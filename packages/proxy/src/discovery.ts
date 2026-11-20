@@ -345,7 +345,7 @@ async function queryWorkspaceInfo(
       });
 
       req.on("error", () => resolve(undefined));
-      req.setTimeout(2500, () => {
+      req.setTimeout(6000, () => {
         req.destroy();
         resolve(undefined);
       });
@@ -411,7 +411,7 @@ async function queryModelCount(inst: LSInstance): Promise<number | undefined> {
       });
 
       req.on("error", () => resolve(undefined));
-      req.setTimeout(800, () => {
+      req.setTimeout(3000, () => {
         req.destroy();
         resolve(undefined);
       });
@@ -480,6 +480,33 @@ async function enrichReachableInstances(
  */
 async function hasAliveExternalLS(): Promise<boolean> {
   const standalonePid = getStandaloneCorePid();
+  // Fast direct check on daemon files using zero-fork kernel signal check first
+  for (const { dir: daemonDir } of DAEMON_DIRS) {
+    try {
+      const files = await readdir(daemonDir);
+      for (const file of files) {
+        if (!(file.startsWith("ls_") || file.startsWith("hub_")) || !file.endsWith(".json")) {
+          continue;
+        }
+        try {
+          const data = JSON.parse(await readFile(join(daemonDir, file), "utf-8")) as {
+            pid?: number;
+          };
+          if (
+            typeof data.pid === "number" &&
+            data.pid !== standalonePid &&
+            hasAliveSignal(data.pid)
+          ) {
+            return true;
+          }
+        } catch {
+          // ignore malformed file
+        }
+      }
+    } catch {
+      // ignore missing daemon dir
+    }
+  }
   const [daemonInstances, processCandidates] = await Promise.all([
     discoverFromDaemon(),
     platformAdapter.discoverFromProcess().catch(() => []),
@@ -489,7 +516,7 @@ async function hasAliveExternalLS(): Promise<boolean> {
   }
   for (const cand of processCandidates) {
     if (cand.pid === standalonePid) continue;
-    if (await platformAdapter.isPidAlive(cand.pid)) {
+    if (hasAliveSignal(cand.pid) || (await platformAdapter.isPidAlive(cand.pid))) {
       return true;
     }
   }
@@ -497,10 +524,19 @@ async function hasAliveExternalLS(): Promise<boolean> {
 }
 
 export async function discoverInstances(): Promise<LSInstance[]> {
-  const [daemonInstances, processCandidates] = await Promise.all([
-    discoverFromDaemon(),
-    platformAdapter.discoverFromProcess().catch(() => []),
-  ]);
+  const daemonInstances = await discoverFromDaemon();
+  const processPromise = platformAdapter.discoverFromProcess().catch(() => []);
+  // When daemon discovery already found alive hub/LS entries, don't let a slow
+  // `ps -axo` scan stall requests for 5+ seconds under heavy host CPU load.
+  const processCandidates =
+    daemonInstances.length > 0
+      ? await Promise.race([
+          processPromise,
+          new Promise<Awaited<typeof processPromise>>((resolve) =>
+            setTimeout(() => resolve([]), 1500),
+          ),
+        ])
+      : await processPromise;
   const knownDaemonPids = new Set(
     daemonInstances
       .filter((inst) => inst.pid && inst.httpsPort > 0)
@@ -590,8 +626,20 @@ export class LSDiscovery {
     const pending = this.discover()
       .then((discovered) => {
         if (generation === this.discoveryGeneration) {
-          this.instances = discovered;
-          this.lastDiscovery = Date.now();
+          if (discovered.length > 0) {
+            this.instances = discovered;
+            this.lastDiscovery = Date.now();
+          } else {
+            // Preserve previously verified LS instances that are still alive
+            // via kernel signal so transient RPC/CPU load spikes never wipe
+            // languageServers to [] and blank out chat messages.
+            const stillAlive = this.instances.filter((inst) =>
+              hasAliveSignal(inst.pid),
+            );
+            this.instances = stillAlive;
+            this.lastDiscovery = stillAlive.length > 0 ? Date.now() - this.ttlMs + 5_000 : Date.now();
+            return stillAlive;
+          }
         }
         return discovered;
       })

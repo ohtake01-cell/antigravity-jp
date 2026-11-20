@@ -21,7 +21,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { rpcForConversation, getStepCount } from "./routing.js";
+import { rpcForConversation, getStepCount, getTrajectorySummary } from "./routing.js";
 import { messageTracker } from "./message-tracker.js";
 import { getAllowedOrigins, isAllowedOrigin, type AllowedOrigin } from "./origins.js";
 import {
@@ -36,7 +36,7 @@ import { sanitizeStepsForClient } from "./step-sanitizer.js";
 /** Active polling interval (ms). */
 const ACTIVE_INTERVAL = 200;
 /** Idle polling interval (ms) for externally-originated updates. */
-const HEARTBEAT_INTERVAL = 1000;
+const HEARTBEAT_INTERVAL = 2000;
 /** Transport keepalive interval (ms) for detecting dead idle sockets. */
 const SOCKET_KEEPALIVE_INTERVAL = 25_000;
 
@@ -451,16 +451,18 @@ export function setupWebSocket(
       /** Is the conversation definitively stopped? */
       const isDefinitelyDone = async (): Promise<boolean> => {
         try {
-          const data = (await rpcForConversation(
-            "GetCascadeTrajectory",
+          const summary = await getTrajectorySummary(
             cascadeId,
-            { cascadeId },
             undefined,
             true,
             targetApp,
-          )) as { status?: string };
+          );
+          if (!summary) {
+            statusCheckFailures += 1;
+            return statusCheckFailures >= MAX_STATUS_CHECK_FAILURES;
+          }
           statusCheckFailures = 0;
-          return isTerminalCascadeStatus(data.status);
+          return isTerminalCascadeStatus(summary.status);
         } catch {
           statusCheckFailures += 1;
           // Fall back to IDLE after repeated RPC failures so a dead LS or
@@ -512,20 +514,19 @@ export function setupWebSocket(
           if (destroyed || pollState !== "idle") return;
 
           try {
-            const data = (await rpcForConversation(
-              "GetCascadeTrajectory",
+            const summary = await getTrajectorySummary(
               cascadeId,
-              { cascadeId },
               undefined,
               true,
               targetApp,
-            )) as { status?: string; numTotalSteps?: number };
+            );
 
             if (
+              summary &&
               shouldActivateIdlePolling(
                 lastStepCount,
-                data.status,
-                data.numTotalSteps,
+                summary.status,
+                summary.count,
               )
             ) {
               // Heartbeat only observes already-visible server state, so it
@@ -558,17 +559,15 @@ export function setupWebSocket(
       const onConnect = async () => {
         let status = "";
         try {
-          const data = (await rpcForConversation(
-            "GetCascadeTrajectory",
+          const summary = await getTrajectorySummary(
             cascadeId,
-            { cascadeId },
             undefined,
             true,
             targetApp,
-          )) as { numTotalSteps?: number; status?: string };
+          );
 
-          const total = data.numTotalSteps ?? 0;
-          status = data.status ?? "";
+          const total = summary?.count ?? 0;
+          status = summary?.status ?? "";
           lastStepCount = total;
 
           if (ws.readyState === WebSocket.OPEN) {

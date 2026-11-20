@@ -189,6 +189,192 @@ export async function rpcForConversation<T>(
 /** The LS status that indicates the agent is actively executing. */
 const RUNNING_STATUS = "CASCADE_RUN_STATUS_RUNNING";
 
+export interface TrajectorySummaryItem {
+  stepCount?: number;
+  status?: string;
+  trajectoryMetadata?: unknown;
+  workspaces?: unknown[];
+}
+
+interface TrajectorySummaryCacheEntry {
+  fetchedAt: number;
+  summaries: Record<string, TrajectorySummaryItem>;
+}
+
+const TRAJECTORY_SUMMARIES_TTL_MS = 1_000;
+const trajectorySummariesCache = new Map<string, TrajectorySummaryCacheEntry>();
+const trajectorySummariesInflight = new Map<
+  string,
+  Promise<Record<string, TrajectorySummaryItem> | null>
+>();
+
+function instanceCacheKey(inst: LSInstance): string {
+  return `${inst.pid}:${inst.httpsPort}`;
+}
+
+/**
+ * Fetch GetAllCascadeTrajectories (~100KB) with short-lived caching and
+ * in-flight deduplication so status/stepCount checks never spam 30MB+
+ * GetCascadeTrajectory payloads on the Node.js event loop.
+ */
+async function getCachedTrajectorySummaries(
+  inst: LSInstance,
+): Promise<Record<string, TrajectorySummaryItem> | null> {
+  const key = instanceCacheKey(inst);
+  const now = Date.now();
+  const useCache = !isTestRuntime();
+
+  if (useCache) {
+    const cached = trajectorySummariesCache.get(key);
+    if (cached && now - cached.fetchedAt < TRAJECTORY_SUMMARIES_TTL_MS) {
+      return cached.summaries;
+    }
+    const inflight = trajectorySummariesInflight.get(key);
+    if (inflight) {
+      return inflight;
+    }
+  }
+
+  const reqPromise = (async () => {
+    try {
+      const data = await rpc.call<{
+        trajectorySummaries?: Record<string, TrajectorySummaryItem>;
+      }>("GetAllCascadeTrajectories", {}, inst);
+      const summaries = data.trajectorySummaries ?? {};
+      if (useCache) {
+        trajectorySummariesCache.set(key, {
+          fetchedAt: Date.now(),
+          summaries,
+        });
+      }
+      return summaries;
+    } catch {
+      return null;
+    } finally {
+      if (useCache) {
+        trajectorySummariesInflight.delete(key);
+      }
+    }
+  })();
+
+  if (useCache) {
+    trajectorySummariesInflight.set(key, reqPromise);
+  }
+  return reqPromise;
+}
+
+/**
+ * Lightweight summary lookup for a single conversation.
+ *
+ * Prefers the ~100KB cached GetAllCascadeTrajectories table over the
+ * multi-megabyte GetCascadeTrajectory RPC. Falls back to GetCascadeTrajectory
+ * only when the conversation is not present in any LS summary table (e.g.
+ * disk-only .pb not yet loaded into LS memory).
+ */
+export async function getTrajectorySummary(
+  cascadeId: string,
+  pinnedInstance?: LSInstance,
+  readOnly = false,
+  targetAppDataDir?: string,
+): Promise<{
+  count: number;
+  status: string;
+  instance: LSInstance | undefined;
+} | null> {
+  const instances = pinnedInstance
+    ? [pinnedInstance]
+    : await discovery.getInstances(false, targetAppDataDir);
+
+  if (instances.length > 0) {
+    const candidates: Array<{
+      inst: LSInstance;
+      stepCount: number;
+      status: string;
+      wsUri?: string;
+    }> = [];
+
+    await Promise.allSettled(
+      instances.map(async (inst) => {
+        const summaries = await getCachedTrajectorySummaries(inst);
+        const summary = summaries?.[cascadeId];
+        if (!summary) return;
+        candidates.push({
+          inst,
+          stepCount: summary.stepCount ?? 0,
+          status: (summary.status as string) ?? "",
+          wsUri: getPrimaryWorkspaceUri(summary),
+        });
+      }),
+    );
+
+    if (candidates.length > 0) {
+      const wsId = conversationAffinity.get(cascadeId);
+      const normalWsId = wsId ? normalizeWorkspaceId(wsId) : undefined;
+      candidates.sort((a, b) => {
+        if (normalWsId) {
+          const aWs =
+            a.inst.workspaceId &&
+            normalizeWorkspaceId(a.inst.workspaceId) === normalWsId
+              ? 1
+              : 0;
+          const bWs =
+            b.inst.workspaceId &&
+            normalizeWorkspaceId(b.inst.workspaceId) === normalWsId
+              ? 1
+              : 0;
+          if (aWs !== bWs) return bWs - aWs;
+        }
+        const aRun = a.status === RUNNING_STATUS ? 1 : 0;
+        const bRun = b.status === RUNNING_STATUS ? 1 : 0;
+        if (aRun !== bRun) return bRun - aRun;
+        return b.stepCount - a.stepCount;
+      });
+      const best = candidates[0];
+      // For write-scoped lookups (readOnly=false), only short-circuit when
+      // ownership is definitively established (explicit workspace match or
+      // single unscoped hub LS). Otherwise fall through to resolveAndCall so
+      // write safety checks remain identical.
+      const hasDefinitiveWriteOwner =
+        Boolean(best.wsUri) ||
+        (!best.inst.workspaceId && candidates.length === 1);
+      if (readOnly || hasDefinitiveWriteOwner) {
+        if (best.wsUri) {
+          conversationAffinity.set(cascadeId, uriToWorkspaceId(best.wsUri));
+        }
+        conversationInstanceAffinity.set(cascadeId, best.inst);
+        return {
+          count: best.stepCount,
+          status: best.status,
+          instance: best.inst,
+        };
+      }
+    }
+  }
+
+  // Fallback for disk-only conversations not yet in GetAllCascadeTrajectories,
+  // or write-scoped lookups that need strict resolveAndCall verification.
+  try {
+    const result = await resolveAndCall<{
+      numTotalSteps?: number;
+      status?: string;
+    }>(
+      "GetCascadeTrajectory",
+      cascadeId,
+      { cascadeId },
+      pinnedInstance,
+      readOnly,
+      targetAppDataDir,
+    );
+    return {
+      count: result.data.numTotalSteps ?? 0,
+      status: result.data.status ?? "",
+      instance: result.instance,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Discover which LS instance owns a conversation by querying all instances
  * for their trajectory summaries.
@@ -223,29 +409,15 @@ export async function discoverOwnerInstance(
 
   await Promise.allSettled(
     instances.map(async (inst) => {
-      try {
-        const data = await rpc.call<{
-          trajectorySummaries?: Record<
-            string,
-            {
-              stepCount?: number;
-              status?: string;
-              trajectoryMetadata?: unknown;
-              workspaces?: unknown[];
-            }
-          >;
-        }>("GetAllCascadeTrajectories", {}, inst);
-        const summary = data.trajectorySummaries?.[cascadeId];
-        if (!summary) return;
-        candidates.push({
-          inst,
-          stepCount: summary.stepCount ?? 0,
-          status: (summary.status as string) ?? "",
-          wsUri: getPrimaryWorkspaceUri(summary),
-        });
-      } catch {
-        // Skip unreachable instances
-      }
+      const summaries = await getCachedTrajectorySummaries(inst);
+      const summary = summaries?.[cascadeId];
+      if (!summary) return;
+      candidates.push({
+        inst,
+        stepCount: summary.stepCount ?? 0,
+        status: (summary.status as string) ?? "",
+        wsUri: getPrimaryWorkspaceUri(summary),
+      });
     }),
   );
 
@@ -494,17 +666,14 @@ export async function getStepCount(
   readOnly = false,
   targetAppDataDir?: string,
 ): Promise<{ count: number; instance: LSInstance | undefined }> {
-  try {
-    const result = await resolveAndCall<{ numTotalSteps?: number }>(
-      "GetCascadeTrajectory",
-      cascadeId,
-      { cascadeId },
-      pinnedInstance,
-      readOnly,
-      targetAppDataDir,
-    );
-    return { count: result.data.numTotalSteps ?? 0, instance: result.instance };
-  } catch {
+  const summary = await getTrajectorySummary(
+    cascadeId,
+    pinnedInstance,
+    readOnly,
+    targetAppDataDir,
+  );
+  if (!summary) {
     return { count: 0, instance: undefined };
   }
+  return { count: summary.count, instance: summary.instance };
 }

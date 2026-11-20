@@ -35,6 +35,8 @@ interface UseChatActionsResult {
   clearOptimisticMessages: () => void;
   stepsRefreshKey: number;
   hardRefreshKey: number;
+  pendingProject: ProjectEntry | null;
+  clearPendingProject: () => void;
   handleSend: (
     text: string,
     model: string | null,
@@ -43,7 +45,7 @@ interface UseChatActionsResult {
     granted?: boolean,
     autoExecutionPolicy?: LocalPermissionPolicy,
   ) => Promise<void>;
-  handleStartInProject: (project: ProjectEntry) => Promise<void>;
+  handleStartInProject: (project: ProjectEntry) => void;
   handleStop: () => Promise<void>;
 
   handleRevert: (stepIndex: number, draftContent?: string) => Promise<boolean>;
@@ -73,6 +75,8 @@ export function useChatActions({
   );
   const [stepsRefreshKey, setStepsRefreshKey] = useState(0);
   const [hardRefreshKey, setHardRefreshKey] = useState(0);
+  const [pendingProject, setPendingProject] = useState<ProjectEntry | null>(null);
+  const clearPendingProject = useCallback(() => setPendingProject(null), []);
 
   const clearOptimisticMessages = useCallback(() => {
     setOptimisticMessages([]);
@@ -139,12 +143,20 @@ export function useChatActions({
 
         // Lazy session creation: create on first message
         if (!cascadeId) {
+          const targetWsUri = pendingProject
+            ? pendingProject.folderUri || undefined
+            : currentWorkspaceUri || undefined;
           const result = await api.startConversation(
-            currentWorkspaceUri || undefined,
+            targetWsUri,
             granted,
+            pendingProject?.id,
           );
           cascadeId = result.cascadeId;
-          navigate(`/${projectSlug}/${cascadeId}`, { replace: true });
+          const targetSlug = targetWsUri
+            ? slugFromUri(targetWsUri)
+            : (projectSlug ?? "unknown");
+          setPendingProject(null);
+          navigate(`/${targetSlug}/${cascadeId}`, { replace: true });
         }
 
         const resolvedPlanner = plannerType
@@ -195,7 +207,7 @@ export function useChatActions({
         setOptimisticMessages((prev) => [...prev, errorMsg]);
       }
     },
-    [activeId, refresh, currentWorkspaceUri, projectSlug, navigate],
+    [activeId, refresh, currentWorkspaceUri, projectSlug, navigate, pendingProject],
   );
 
   const handleStop = useCallback(async () => {
@@ -270,24 +282,17 @@ export function useChatActions({
   );
 
   const handleStartInProject = useCallback(
-    async (project: ProjectEntry) => {
-      try {
-        const result = await api.startConversation(
-          project.folderUri || undefined,
-          true,
-          project.id,
-        );
-        const slug = project.folderUri
-          ? slugFromUri(project.folderUri)
-          : (projectSlug ?? "unknown");
-        setOptimisticMessages([]);
-        navigate(`/${slug}/${result.cascadeId}`);
-        refresh();
-      } catch (err) {
-        console.error("Failed to start conversation in project:", err);
-      }
+    (project: ProjectEntry) => {
+      // Lazy start: select target project and open the new-chat composer without
+      // eagerly creating an empty 0-step cascade on the LS.
+      setPendingProject(project);
+      setOptimisticMessages([]);
+      const slug = project.folderUri
+        ? slugFromUri(project.folderUri)
+        : "cli-project";
+      navigate(`/${slug}`);
     },
-    [navigate, projectSlug, refresh],
+    [navigate],
   );
 
   const triggerSoftRefresh = useCallback(() => {
@@ -301,6 +306,8 @@ export function useChatActions({
     clearOptimisticMessages,
     stepsRefreshKey,
     hardRefreshKey,
+    pendingProject,
+    clearPendingProject,
     handleSend,
     handleStartInProject,
     handleStop,

@@ -39,14 +39,24 @@ interface WorkspaceGroup {
   name: string;
   isRunningSection?: boolean;
   isPinnedSection?: boolean;
+  project?: ProjectEntry;
   conversations: ConversationEntry[];
   hasRunning: boolean;
 }
 
 const PREVIEW_COUNT = 10;
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function parseSafeTime(iso?: string): number {
+  if (!iso) return 0;
+  const ts = new Date(iso).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function relativeTime(iso?: string): string {
+  const ts = parseSafeTime(iso);
+  if (!ts) return "たった今";
+  const diff = Date.now() - ts;
+  if (!Number.isFinite(diff) || diff < 0) return "たった今";
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "たった今";
   if (mins < 60) return `${mins}分前`;
@@ -212,12 +222,12 @@ export function formatCompactModelBadge(
     };
   }
 
-  // Local Ollama / Qwen / ローカル models
+  // Local Ollama / Qwen models
   if (provider === "ollama") {
     const sizeMatch = /(\d+(?:\.\d+)?b)\b/i.exec(fullLabel);
     const sizeStr = sizeMatch ? ` ${sizeMatch[1].toUpperCase()}` : "";
     if (/local-llm/i.test(fullLabel)) {
-      return { text: `Local${sizeStr}`, provider, fullLabel };
+      return { text: `ローカル${sizeStr}`, provider, fullLabel };
     }
     if (/qwen/i.test(fullLabel)) {
       return { text: `Qwen${sizeStr}`, provider, fullLabel };
@@ -396,7 +406,7 @@ export function Sidebar({
   >("all");
   const [subagentOnlyFilter, setSubagentOnlyFilter] = useState(false);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [hideEmptyProjects, setHideEmptyProjects] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -468,42 +478,38 @@ export function Sidebar({
       try {
         await api.deleteProject(proj.id);
         setProjects((prev) => prev.filter((p) => p.id !== proj.id));
-        if (selectedProjectId === proj.id) {
-          setSelectedProjectId(null);
-        }
       } catch (err) {
         console.error("Failed to delete project:", err);
       } finally {
         setProjectMenuId(null);
       }
     },
-    [selectedProjectId],
+    [],
   );
 
-  const projectConvCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const proj of projects) {
-      counts[proj.id] = 0;
-    }
-    for (const conv of conversations) {
-      if (isArchived(conv) || localArchivedIds[conv.id]) continue;
-      const wsName = extractWorkspaceName(conv);
+  const matchConversationProject = useCallback(
+    (conv: ConversationEntry): ProjectEntry | undefined => {
+      if (projects.length === 0) return undefined;
+      const metaProjId = (conv.summary.trajectoryMetadata as { projectId?: string } | undefined)?.projectId;
+      if (metaProjId) {
+        const byId = projects.find((p) => p.id === metaProjId);
+        if (byId) return byId;
+      }
       const wsUri = conv.summary.workspaces?.[0]?.workspaceFolderAbsoluteUri?.replace(
         /\/+$/,
         "",
       );
-      for (const proj of projects) {
-        const projUri = proj.folderUri?.replace(/\/+$/, "");
-        if (
-          (projUri && wsUri && projUri === wsUri) ||
-          wsName === proj.name
-        ) {
-          counts[proj.id] = (counts[proj.id] ?? 0) + 1;
-        }
+      if (wsUri) {
+        const byUri = projects.find(
+          (p) => p.folderUri && p.folderUri.replace(/\/+$/, "") === wsUri,
+        );
+        if (byUri) return byUri;
       }
-    }
-    return counts;
-  }, [projects, conversations, localArchivedIds]);
+      const wsName = extractWorkspaceName(conv);
+      return projects.find((p) => p.name === wsName);
+    },
+    [projects],
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
     | {
@@ -687,7 +693,12 @@ export function Sidebar({
   const groups = useMemo<WorkspaceGroup[]>(() => {
     const runningList: ConversationEntry[] = [];
     const pinnedList: ConversationEntry[] = [];
+    const projectMap = new Map<string, ConversationEntry[]>();
     const workspaceMap = new Map<string, ConversationEntry[]>();
+
+    for (const proj of projects) {
+      projectMap.set(proj.id, []);
+    }
 
     for (const conv of conversations) {
       if (isArchived(conv) || localArchivedIds[conv.id]) continue;
@@ -707,20 +718,6 @@ export function Sidebar({
         )
       ) {
         continue;
-      }
-      if (selectedProjectId) {
-        const targetProj = projects.find((p) => p.id === selectedProjectId);
-        if (targetProj) {
-          const wsName = extractWorkspaceName(conv);
-          const wsUri = conv.summary.workspaces?.[0]?.workspaceFolderAbsoluteUri?.replace(
-            /\/+$/,
-            "",
-          );
-          const projUri = targetProj.folderUri?.replace(/\/+$/, "");
-          const matchesProj =
-            (projUri && wsUri && projUri === wsUri) || wsName === targetProj.name;
-          if (!matchesProj) continue;
-        }
       }
       if (providerFilter !== "all") {
         const badge = formatCompactModelBadge(
@@ -742,10 +739,17 @@ export function Sidebar({
       if (isPinned) {
         pinnedList.push(conv);
       } else {
-        const name = extractWorkspaceName(conv);
-        const list = workspaceMap.get(name) ?? [];
-        list.push(conv);
-        workspaceMap.set(name, list);
+        const matchedProj = matchConversationProject(conv);
+        if (matchedProj) {
+          const list = projectMap.get(matchedProj.id) ?? [];
+          list.push(conv);
+          projectMap.set(matchedProj.id, list);
+        } else {
+          const name = extractWorkspaceName(conv);
+          const list = workspaceMap.get(name) ?? [];
+          list.push(conv);
+          workspaceMap.set(name, list);
+        }
       }
     }
 
@@ -764,8 +768,8 @@ export function Sidebar({
         const bDirect = b.summary.status === "CASCADE_RUN_STATUS_RUNNING";
         if (aDirect !== bDirect) return aDirect ? -1 : 1;
         return (
-          new Date(b.summary.lastModifiedTime).getTime() -
-          new Date(a.summary.lastModifiedTime).getTime()
+          parseSafeTime(b.summary.lastModifiedTime) -
+          parseSafeTime(a.summary.lastModifiedTime)
         );
       });
 
@@ -781,8 +785,8 @@ export function Sidebar({
     if (pinnedList.length > 0) {
       pinnedList.sort(
         (a, b) =>
-          new Date(b.summary.lastModifiedTime).getTime() -
-          new Date(a.summary.lastModifiedTime).getTime(),
+          parseSafeTime(b.summary.lastModifiedTime) -
+          parseSafeTime(a.summary.lastModifiedTime),
       );
 
       result.push({
@@ -793,16 +797,38 @@ export function Sidebar({
       });
     }
 
-    // 2. Workspace / Project groups
-    const workspaceGroups = Array.from(workspaceMap.entries())
+    // 2. Registered Projects (Antigravity-style unified project folders containing their chats)
+    const projectGroups: WorkspaceGroup[] = [];
+    for (const proj of projects) {
+      const convs = projectMap.get(proj.id) ?? [];
+      if (hideEmptyProjects && convs.length === 0) continue;
+      convs.sort((a, b) => {
+        const aRunning = isConvRunning(a);
+        const bRunning = isConvRunning(b);
+        if (aRunning !== bRunning) return aRunning ? -1 : 1;
+        return (
+          parseSafeTime(b.summary.lastModifiedTime) -
+          parseSafeTime(a.summary.lastModifiedTime)
+        );
+      });
+      projectGroups.push({
+        name: proj.name,
+        project: proj,
+        conversations: convs,
+        hasRunning: convs.some((c) => isConvRunning(c)),
+      });
+    }
+
+    // 3. Other / Unregistered workspace groups (e.g., ワークスペースなし)
+    const workspaceGroups: WorkspaceGroup[] = Array.from(workspaceMap.entries())
       .map(([name, convs]) => {
         convs.sort((a, b) => {
           const aRunning = isConvRunning(a);
           const bRunning = isConvRunning(b);
           if (aRunning !== bRunning) return aRunning ? -1 : 1;
           return (
-            new Date(b.summary.lastModifiedTime).getTime() -
-            new Date(a.summary.lastModifiedTime).getTime()
+            parseSafeTime(b.summary.lastModifiedTime) -
+            parseSafeTime(a.summary.lastModifiedTime)
           );
         });
         return {
@@ -820,28 +846,27 @@ export function Sidebar({
         const bHasActive = b.conversations.some((c) => !isUnloaded(c));
         if (aHasActive !== bHasActive) return aHasActive ? -1 : 1;
         const aTime = Math.max(
-          ...a.conversations.map((c) =>
-            new Date(c.summary.lastModifiedTime).getTime(),
-          ),
+          0,
+          ...a.conversations.map((c) => parseSafeTime(c.summary.lastModifiedTime)),
         );
         const bTime = Math.max(
-          ...b.conversations.map((c) =>
-            new Date(c.summary.lastModifiedTime).getTime(),
-          ),
+          0,
+          ...b.conversations.map((c) => parseSafeTime(c.summary.lastModifiedTime)),
         );
 
         return bTime - aTime;
       });
 
-    return [...result, ...workspaceGroups];
+    return [...result, ...projectGroups, ...workspaceGroups];
   }, [
     conversations,
     localArchivedIds,
     localPinnedOverrides,
     providerFilter,
     subagentOnlyFilter,
-    selectedProjectId,
     projects,
+    hideEmptyProjects,
+    matchConversationProject,
   ]);
 
   const toggleGroup = (name: string) => {
@@ -948,7 +973,9 @@ export function Sidebar({
         hasActiveChild ||
         (agentTreeCount > 0 && (isActive || agentTreeCount <= 3)));
     const lastSeen = seenAt[conv.id];
-    const displayTitle = localTitleOverrides[conv.id] ?? conv.summary.summary;
+    const displayTitle =
+      (localTitleOverrides[conv.id] ?? conv.summary.summary)?.trim() ||
+      "新しいチャット";
     const isPinned =
       localPinnedOverrides[conv.id] ??
       conv.summary.annotations?.pinned === true;
@@ -1144,7 +1171,7 @@ export function Sidebar({
                         <span className="sidebar-meta-details">
                           {relativeTime(conv.summary.lastModifiedTime)}
                           {" · "}
-                          {conv.summary.stepCount} ステップ
+                          {conv.summary.stepCount ?? 0} ステップ
                           {conv.summary.projectName && (
                             <span className="sidebar-meta-project">
                               {" · "}
@@ -1376,11 +1403,11 @@ export function Sidebar({
       <div className="sidebar-header">
         <span
           className="sidebar-brand-wrap"
-          title={connected ? "Antigravity 日本語版（接続中）" : "Antigravity 日本語版（未接続）"}
+          title={connected ? "Antigravity JP（接続中）" : "Antigravity JP（未接続）"}
         >
           <img
             src={getAppIconUrl(appIconPreset)}
-            alt="Antigravity 日本語版"
+            alt="Antigravity JP"
             className="sidebar-brand-icon"
             width={24}
             height={24}
@@ -1396,6 +1423,8 @@ export function Sidebar({
         </button>
       </div>
 
+      {/* Unified scroll body so actions/filters/projects scroll together on phone & desktop */}
+      <div className="sidebar-scroll-body">
       {/* Action buttons */}
       <div className="sidebar-actions">
         {actions.map((action, i) => (
@@ -1409,206 +1438,6 @@ export function Sidebar({
           </button>
         ))}
       </div>
-
-      {/* Projects section (Antigravity-equivalent Japanese project list) */}
-      {(projects.length > 0 || addProjectOpen) && (
-        <div className="sidebar-projects-section" data-testid="sidebar-projects">
-          <div className="sidebar-projects-header">
-            <span className="sidebar-projects-title">プロジェクト</span>
-            <div className="sidebar-projects-header-actions">
-              <button
-                type="button"
-                className={`sidebar-projects-icon-btn ${selectedProjectId ? "active" : ""}`}
-                title={
-                  selectedProjectId
-                    ? "プロジェクト絞り込みを解除"
-                    : "選択中プロジェクトで絞り込む"
-                }
-                aria-label="プロジェクト絞り込み"
-                onClick={() => {
-                  if (selectedProjectId) {
-                    setSelectedProjectId(null);
-                  } else if (projects[0]) {
-                    setSelectedProjectId(projects[0].id);
-                  }
-                }}
-              >
-                <IconFilter size={13} />
-              </button>
-              <button
-                type="button"
-                className={`sidebar-projects-icon-btn ${addProjectOpen ? "active" : ""}`}
-                title="プロジェクトを追加"
-                aria-label="プロジェクトを追加"
-                onClick={() => {
-                  setAddProjectOpen((v) => !v);
-                  setProjectError(null);
-                }}
-              >
-                <IconFolderPlus size={14} />
-              </button>
-            </div>
-          </div>
-
-          {addProjectOpen && (
-            <form
-              className="sidebar-project-add-form"
-              onSubmit={(e) => void handleCreateProject(e)}
-            >
-              <input
-                type="text"
-                className="sidebar-project-input"
-                placeholder="フォルダパス（例: ~/Projects）"
-                value={newProjectFolder}
-                onChange={(e) => setNewProjectFolder(e.target.value)}
-                disabled={projectSaving}
-              />
-              <input
-                type="text"
-                className="sidebar-project-input"
-                placeholder="プロジェクト名（省略時はフォルダ名）"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                disabled={projectSaving}
-              />
-              {projectError && (
-                <div className="sidebar-project-error">{projectError}</div>
-              )}
-              <div className="sidebar-project-form-btns">
-                <button
-                  type="submit"
-                  className="sidebar-project-submit-btn"
-                  disabled={projectSaving}
-                >
-                  {projectSaving ? "追加中…" : "追加"}
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-project-cancel-btn"
-                  onClick={() => {
-                    setAddProjectOpen(false);
-                    setProjectError(null);
-                  }}
-                >
-                  キャンセル
-                </button>
-              </div>
-            </form>
-          )}
-
-          <div className="sidebar-projects-list">
-            {projects.map((proj) => {
-              const isSelected = selectedProjectId === proj.id;
-              const convCount = projectConvCounts[proj.id] ?? 0;
-              return (
-                <div key={proj.id} className="sidebar-project-entry">
-                  <div
-                    className={`sidebar-project-row ${isSelected ? "active" : ""}`}
-                    onClick={() =>
-                      setSelectedProjectId((cur) =>
-                        cur === proj.id ? null : proj.id,
-                      )
-                    }
-                    title={proj.folderPath ? `${proj.name} (${proj.folderPath})` : proj.name}
-                  >
-                    <span className="sidebar-project-folder-icon" aria-hidden="true">
-                      <IconFolder size={13} />
-                    </span>
-                    <span className="sidebar-project-name">{proj.name}</span>
-                    <div
-                      className="sidebar-project-row-actions"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="sidebar-project-menu-wrap">
-                        <button
-                          type="button"
-                          className="sidebar-project-row-btn"
-                          title="プロジェクトメニュー"
-                          aria-label={`${proj.name}のメニュー`}
-                          onClick={() =>
-                            setProjectMenuId((cur) =>
-                              cur === proj.id ? null : proj.id,
-                            )
-                          }
-                        >
-                          <IconMore size={13} />
-                        </button>
-                        {projectMenuId === proj.id && (
-                          <div className="sidebar-project-dropdown" role="menu">
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="sidebar-project-dropdown-item"
-                              onClick={() => {
-                                setProjectMenuId(null);
-                                if (onNewInProject) onNewInProject(proj);
-                                else onNew();
-                              }}
-                            >
-                              新規チャットを作成
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="sidebar-project-dropdown-item"
-                              onClick={() => {
-                                setSelectedProjectId((cur) =>
-                                  cur === proj.id ? null : proj.id,
-                                );
-                                setProjectMenuId(null);
-                              }}
-                            >
-                              {isSelected ? "絞り込みを解除" : "このプロジェクトで絞り込む"}
-                            </button>
-                            {proj.folderPath && (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="sidebar-project-dropdown-item"
-                                onClick={() => {
-                                  void navigator.clipboard?.writeText(proj.folderPath!);
-                                  setProjectMenuId(null);
-                                }}
-                              >
-                                パスをコピー
-                              </button>
-                            )}
-                            {!proj.isDefaultCli && (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="sidebar-project-dropdown-item danger"
-                                onClick={() => void handleDeleteProject(proj)}
-                              >
-                                プロジェクトを削除
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        className="sidebar-project-row-btn"
-                        title={`${proj.name}で新規チャットを作成`}
-                        aria-label={`${proj.name}で新規チャット`}
-                        onClick={() => {
-                          if (onNewInProject) onNewInProject(proj);
-                          else onNew();
-                        }}
-                      >
-                        <IconPlus size={13} />
-                      </button>
-                    </div>
-                  </div>
-                  {(isSelected || proj.isDefaultCli) && convCount === 0 && (
-                    <div className="sidebar-project-empty">まだ会話はありません</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Smart provider filter strip: only shown when 2+ model providers exist */}
       {activeProviders.length >= 2 && (
@@ -1686,58 +1515,298 @@ export function Sidebar({
             <div className="loading-spinner" />
           </div>
         ) : (
-          groups.map((group) => {
-            const totalCount = group.conversations.length;
-            const isGroupCollapsed = collapsed[group.name] ?? false;
-            const isExpanded = expanded[group.name] ?? false;
-            const alwaysShowAll =
-              group.isRunningSection || group.isPinnedSection;
-            const visibleItems =
-              alwaysShowAll || isExpanded
-                ? group.conversations
-                : group.conversations.slice(0, PREVIEW_COUNT);
-            const hiddenCount = alwaysShowAll ? 0 : totalCount - PREVIEW_COUNT;
-
-            return (
-              <div
-                key={group.name}
-                className={`workspace-group ${group.isRunningSection ? "running-workspace-group" : ""} ${group.isPinnedSection ? "pinned-workspace-group" : ""}`}
-              >
-                <button
-                  type="button"
-                  className={`workspace-group-header ${group.isRunningSection ? "running-group-header" : ""} ${group.isPinnedSection ? "pinned-group-header" : ""}`}
-                  onClick={() => toggleGroup(group.name)}
-                >
-                  <span
-                    className={`workspace-group-chevron ${isGroupCollapsed ? "collapsed" : ""}`}
+          <>
+            {groups
+              .filter((g) => g.isRunningSection || g.isPinnedSection)
+              .map((group) => {
+                const totalCount = group.conversations.length;
+                const isGroupCollapsed = collapsed[group.name] ?? false;
+                return (
+                  <div
+                    key={group.name}
+                    className={`workspace-group ${group.isRunningSection ? "running-workspace-group" : ""} ${group.isPinnedSection ? "pinned-workspace-group" : ""}`}
                   >
-                    ▾
-                  </span>
-                  <span className="workspace-group-name">{group.name}</span>
-                  {group.hasRunning && (
-                    <IconSpinner size={12} className="sidebar-running-spinner" />
-                  )}
-                  <span className="workspace-group-count">{totalCount}</span>
-                </button>
-
-                {!isGroupCollapsed && (
-                  <div className="workspace-group-items">
-                    {visibleItems.map(renderItem)}
-
-                    {hiddenCount > 0 && (
-                      <button
-                        className="see-all-btn"
-                        onClick={() => toggleExpanded(group.name)}
+                    <button
+                      type="button"
+                      className={`workspace-group-header ${group.isRunningSection ? "running-group-header" : ""} ${group.isPinnedSection ? "pinned-group-header" : ""}`}
+                      onClick={() => toggleGroup(group.name)}
+                    >
+                      <span
+                        className={`workspace-group-chevron ${isGroupCollapsed ? "collapsed" : ""}`}
                       >
-                        {isExpanded ? "折りたたむ" : `すべて表示 (${totalCount}件)`}
-                      </button>
+                        ▾
+                      </span>
+                      <span className="workspace-group-name">{group.name}</span>
+                      {group.hasRunning && (
+                        <IconSpinner size={12} className="sidebar-running-spinner" />
+                      )}
+                      <span className="workspace-group-count">{totalCount}</span>
+                    </button>
+
+                    {!isGroupCollapsed && (
+                      <div className="workspace-group-items">
+                        {group.conversations.map(renderItem)}
+                      </div>
                     )}
                   </div>
+                );
+              })}
+
+            {(projects.length > 0 || addProjectOpen) && (
+              <div className="sidebar-projects-bar" data-testid="sidebar-projects">
+                <div className="sidebar-projects-header">
+                  <span className="sidebar-projects-title">プロジェクト</span>
+                  <div className="sidebar-projects-header-actions">
+                    <button
+                      type="button"
+                      className={`sidebar-projects-icon-btn ${hideEmptyProjects ? "active" : ""}`}
+                      title={
+                        hideEmptyProjects
+                          ? "空のプロジェクトも表示"
+                          : "会話のあるプロジェクトのみ表示"
+                      }
+                      aria-label="プロジェクト絞り込み"
+                      onClick={() => setHideEmptyProjects((v) => !v)}
+                    >
+                      <IconFilter size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`sidebar-projects-icon-btn ${addProjectOpen ? "active" : ""}`}
+                      title="プロジェクトを追加"
+                      aria-label="プロジェクトを追加"
+                      onClick={() => {
+                        setAddProjectOpen((v) => !v);
+                        setProjectError(null);
+                      }}
+                    >
+                      <IconFolderPlus size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {addProjectOpen && (
+                  <form
+                    className="sidebar-project-add-form"
+                    onSubmit={(e) => void handleCreateProject(e)}
+                  >
+                    <input
+                      type="text"
+                      className="sidebar-project-input"
+                      placeholder="フォルダパス（例: ~/Projects）"
+                      value={newProjectFolder}
+                      onChange={(e) => setNewProjectFolder(e.target.value)}
+                      disabled={projectSaving}
+                    />
+                    <input
+                      type="text"
+                      className="sidebar-project-input"
+                      placeholder="プロジェクト名（省略時はフォルダ名）"
+                      value={newProjectName}
+                      onChange={(e) => setNewProjectName(e.target.value)}
+                      disabled={projectSaving}
+                    />
+                    {projectError && (
+                      <div className="sidebar-project-error">{projectError}</div>
+                    )}
+                    <div className="sidebar-project-form-btns">
+                      <button
+                        type="submit"
+                        className="sidebar-project-submit-btn"
+                        disabled={projectSaving}
+                      >
+                        {projectSaving ? "追加中…" : "追加"}
+                      </button>
+                      <button
+                        type="button"
+                        className="sidebar-project-cancel-btn"
+                        onClick={() => {
+                          setAddProjectOpen(false);
+                          setProjectError(null);
+                        }}
+                      >
+                        キャンセル
+                      </button>
+                    </div>
+                  </form>
                 )}
               </div>
-            );
-          })
+            )}
+
+            {groups
+              .filter((g) => !g.isRunningSection && !g.isPinnedSection)
+              .map((group) => {
+                const proj = group.project;
+                const groupKey = proj ? `proj:${proj.id}` : group.name;
+                const totalCount = group.conversations.length;
+                const isGroupCollapsed = collapsed[groupKey] ?? false;
+                const isExpanded = expanded[groupKey] ?? false;
+                const visibleItems = isExpanded
+                  ? group.conversations
+                  : group.conversations.slice(0, PREVIEW_COUNT);
+                const hiddenCount = totalCount - PREVIEW_COUNT;
+
+                return (
+                  <div
+                    key={groupKey}
+                    className={`workspace-group ${proj ? "project-workspace-group" : ""}`}
+                  >
+                    {proj ? (
+                      <div
+                        className={`workspace-group-header project-group-header ${isGroupCollapsed ? "is-collapsed" : ""}`}
+                        onClick={() => toggleGroup(groupKey)}
+                        title={
+                          proj.folderPath
+                            ? `${proj.name} (${proj.folderPath})`
+                            : proj.name
+                        }
+                      >
+                        <span
+                          className={`workspace-group-chevron ${isGroupCollapsed ? "collapsed" : ""}`}
+                        >
+                          ▾
+                        </span>
+                        <span
+                          className="sidebar-project-folder-icon"
+                          aria-hidden="true"
+                        >
+                          <IconFolder size={13} />
+                        </span>
+                        <span className="workspace-group-name">{proj.name}</span>
+                        {totalCount > 0 && (
+                          <span className="workspace-group-count">
+                            {totalCount}
+                          </span>
+                        )}
+                        <div
+                          className="sidebar-project-row-actions"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="sidebar-project-menu-wrap">
+                            <button
+                              type="button"
+                              className="sidebar-project-row-btn"
+                              title="プロジェクトメニュー"
+                              aria-label={`${proj.name}のメニュー`}
+                              onClick={() =>
+                                setProjectMenuId((cur) =>
+                                  cur === proj.id ? null : proj.id,
+                                )
+                              }
+                            >
+                              <IconMore size={13} />
+                            </button>
+                            {projectMenuId === proj.id && (
+                              <div
+                                className="sidebar-project-dropdown"
+                                role="menu"
+                              >
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="sidebar-project-dropdown-item"
+                                  onClick={() => {
+                                    setProjectMenuId(null);
+                                    if (onNewInProject) onNewInProject(proj);
+                                    else onNew();
+                                  }}
+                                >
+                                  新規チャットを作成
+                                </button>
+                                {proj.folderPath && (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="sidebar-project-dropdown-item"
+                                    onClick={() => {
+                                      void navigator.clipboard?.writeText(
+                                        proj.folderPath!,
+                                      );
+                                      setProjectMenuId(null);
+                                    }}
+                                  >
+                                    パスをコピー
+                                  </button>
+                                )}
+                                {!proj.isDefaultCli && (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="sidebar-project-dropdown-item danger"
+                                    onClick={() => void handleDeleteProject(proj)}
+                                  >
+                                    プロジェクトを削除
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className="sidebar-project-row-btn"
+                            title={`${proj.name}で新規チャットを作成`}
+                            aria-label={`${proj.name}で新規チャット`}
+                            onClick={() => {
+                              if (onNewInProject) onNewInProject(proj);
+                              else onNew();
+                            }}
+                          >
+                            <IconPlus size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="workspace-group-header"
+                        onClick={() => toggleGroup(groupKey)}
+                      >
+                        <span
+                          className={`workspace-group-chevron ${isGroupCollapsed ? "collapsed" : ""}`}
+                        >
+                          ▾
+                        </span>
+                        <span className="workspace-group-name">{group.name}</span>
+                        {group.hasRunning && (
+                          <IconSpinner
+                            size={12}
+                            className="sidebar-running-spinner"
+                          />
+                        )}
+                        <span className="workspace-group-count">
+                          {totalCount}
+                        </span>
+                      </button>
+                    )}
+
+                    {!isGroupCollapsed && (
+                      <div className="workspace-group-items">
+                        {proj && totalCount === 0 ? (
+                          <div className="sidebar-project-empty">
+                            まだ会話はありません
+                          </div>
+                        ) : (
+                          visibleItems.map(renderItem)
+                        )}
+
+                        {hiddenCount > 0 && (
+                          <button
+                            className="see-all-btn"
+                            onClick={() => toggleExpanded(groupKey)}
+                          >
+                            {isExpanded
+                              ? "折りたたむ"
+                              : `すべて表示 (${totalCount}件)`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </>
         )}
+      </div>
       </div>
 
       {/* Search Modal */}

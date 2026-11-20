@@ -94,6 +94,7 @@ export function spawnLoggedProcess(
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     shell: true,
+    detached: !isWindows,
   });
   const logStream = createWriteStream(logFile, { flags: "a" });
 
@@ -127,7 +128,37 @@ export async function terminateChild(child) {
     return;
   }
 
-  child.kill("SIGTERM");
+  const exited = waitForExit(child);
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      return;
+    }
+  }
+
+  const graceResult = await Promise.race([
+    exited.then(() => "exited"),
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), 3000)),
+  ]);
+
+  if (graceResult === "timeout" && child.exitCode === null) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        return;
+      }
+    }
+    await Promise.race([
+      exited,
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
+  }
 }
 
 export function waitForExit(child) {

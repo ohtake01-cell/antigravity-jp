@@ -17,6 +17,7 @@ import {
 } from "./transport-hints.js";
 
 const SERVICE_PREFIX = "exa.language_server_pb.LanguageServerService";
+const RPC_TIMEOUT_MS = 30_000;
 
 /** Errors indicating we tried TLS on a plaintext port. */
 export function isTlsProtocolError(err: unknown): boolean {
@@ -61,11 +62,18 @@ export class RPCClient {
     }
 
     try {
+      const startedAt = Date.now();
       const { value } = await this.withTransportFallback(ls, (protocol) =>
         protocol === "https"
           ? this.httpsPost(ls, method, body)
           : this.httpPost(ls, method, body),
       );
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= 1000 || value.body.length >= 1_000_000) {
+        console.warn(
+          `[RPC slow/large] ${method} port=${ls.httpsPort} status=${value.statusCode} elapsed=${elapsedMs}ms bytes=${value.body.length} cascadeId=${String(body.cascadeId ?? "").slice(0, 8)} offset=${body.stepOffset ?? "-"}`,
+        );
+      }
 
       if (value.statusCode < 200 || value.statusCode >= 300) {
         let parsed: { code?: string; message?: string } = {};
@@ -255,6 +263,9 @@ export class RPCClient {
         });
       });
 
+      req.setTimeout(RPC_TIMEOUT_MS, () => {
+        req.destroy(new Error(`RPC ${method} timed out after ${RPC_TIMEOUT_MS}ms`));
+      });
       req.on("error", reject);
       req.write(payload);
       req.end();
@@ -292,6 +303,9 @@ export class RPCClient {
         });
       });
 
+      req.setTimeout(RPC_TIMEOUT_MS, () => {
+        req.destroy(new Error(`RPC ${method} timed out after ${RPC_TIMEOUT_MS}ms`));
+      });
       req.on("error", reject);
       req.write(payload);
       req.end();

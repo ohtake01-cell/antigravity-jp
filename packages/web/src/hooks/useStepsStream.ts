@@ -98,6 +98,8 @@ export function useStepsStream(
   const mountedRef = useRef(true);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialRetryAttemptRef = useRef(0);
   const stepsRef = useRef<TrajectoryStep[]>(initialCachedPage.steps);
   // The absolute offset of stepsRef[0] in the full trajectory.
   const baseOffsetRef = useRef(initialCachedPage.offset);
@@ -138,6 +140,13 @@ export function useStepsStream(
     if (reconnectTimerRef.current !== null) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const clearInitialRetryTimer = useCallback(() => {
+    if (initialRetryTimerRef.current !== null) {
+      clearTimeout(initialRetryTimerRef.current);
+      initialRetryTimerRef.current = null;
     }
   }, []);
 
@@ -354,29 +363,49 @@ export function useStepsStream(
   useEffect(() => {
     mountedRef.current = true;
     bumpGeneration();
+    clearInitialRetryTimer();
+    initialRetryAttemptRef.current = 0;
     setLoading(stepsRef.current.length === 0);
     setError(null);
     setHasMore(baseOffsetRef.current > 0);
     setWsRunning(false);
 
-    (async () => {
+    const runInitialLoad = async (gen: number) => {
       const result = await initialFetch();
-      if (!result || !mountedRef.current) return;
+      if (!mountedRef.current || gen !== genRef.current) return;
+      if (!result) {
+        if (stepsRef.current.length === 0) {
+          initialRetryAttemptRef.current += 1;
+          const delayMs = Math.min(2000 * initialRetryAttemptRef.current, 10_000);
+          clearInitialRetryTimer();
+          initialRetryTimerRef.current = setTimeout(() => {
+            initialRetryTimerRef.current = null;
+            if (!mountedRef.current || gen !== genRef.current) return;
+            void runInitialLoad(gen);
+          }, delayMs);
+        }
+        return;
+      }
+      initialRetryAttemptRef.current = 0;
+      clearInitialRetryTimer();
       // Connect WS, starting deltas from the end of our loaded window
       const syncFrom = result.offset + result.count;
       connectWs(syncFrom);
-    })();
+    };
+
+    void runInitialLoad(genRef.current);
 
     return () => {
       mountedRef.current = false;
       bumpGeneration();
       clearReconnectTimer();
+      clearInitialRetryTimer();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [initialFetch, connectWs, clearReconnectTimer, bumpGeneration]);
+  }, [initialFetch, connectWs, clearReconnectTimer, clearInitialRetryTimer, bumpGeneration]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -541,6 +570,8 @@ export function useStepsStream(
   // ── Hard refresh: full nuke-and-reload (for revert/stop) ──
   const hardRefresh = useCallback(() => {
     genRef.current++;
+    clearInitialRetryTimer();
+    initialRetryAttemptRef.current = 0;
     stepsRef.current = [];
     baseOffsetRef.current = 0;
     endOffsetRef.current = 0;
@@ -558,13 +589,14 @@ export function useStepsStream(
       wsRef.current = null;
     }
 
+    const gen = genRef.current;
     (async () => {
       const result = await initialFetch();
-      if (!result || !mountedRef.current) return;
+      if (!result || !mountedRef.current || gen !== genRef.current) return;
       const syncFrom = result.offset + result.count;
       connectWs(syncFrom);
     })();
-  }, [initialFetch, connectWs, clearReconnectTimer, saveStepsToCache]);
+  }, [initialFetch, connectWs, clearReconnectTimer, clearInitialRetryTimer, saveStepsToCache]);
 
   return {
     steps,

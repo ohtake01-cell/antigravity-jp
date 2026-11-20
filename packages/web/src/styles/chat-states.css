@@ -352,6 +352,63 @@ details[open] .thinking-chevron {
   pointer-events: none;
 }
 
+.msg-action-pill.primary {
+  color: #ffffff;
+  background: var(--accent, #6366f1);
+  border-color: transparent;
+  font-weight: 500;
+}
+
+.msg-action-pill.primary:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--accent-hover, #4f46e5);
+  border-color: transparent;
+}
+
+.msg-action-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.message.user.editing .message-body {
+  width: min(100%, 640px);
+}
+
+.msg-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.msg-edit-textarea {
+  width: 100%;
+  min-height: 68px;
+  max-height: 320px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.msg-edit-textarea:focus {
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+}
+
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .message.user.failed .message-body {
   border-color: rgba(239, 68, 68, 0.55);
   background: rgba(239, 68, 68, 0.1);

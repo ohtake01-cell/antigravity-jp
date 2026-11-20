@@ -254,6 +254,8 @@ function ChatView() {
     confirmOptimisticMessages,
     stepsRefreshKey,
     hardRefreshKey,
+    pendingProject,
+    clearPendingProject,
     handleSend: doSend,
     handleStartInProject,
     handleStop,
@@ -320,6 +322,53 @@ function ChatView() {
       );
     },
     [doSend, settings.localPermissionPolicy],
+  );
+
+  // Edit a user comment inline: revert before that comment (or remove local optimistic) and re-send
+  const handleEditComment = useCallback(
+    async (
+      stepIndex: number,
+      editedText: string,
+      optimisticId?: string,
+    ): Promise<boolean> => {
+      const trimmed = editedText.trim();
+      if (!trimmed) return false;
+      const resolvedModel =
+        activeConv?.summary.model ??
+        activeSubagentMatch?.child.model ??
+        settings.defaultModel ??
+        null;
+
+      if (optimisticId && stepIndex < 0) {
+        rawHandleRemoveOptimistic(optimisticId);
+        await handleSend(
+          trimmed,
+          resolvedModel,
+          undefined,
+          settings.defaultPlannerType,
+        );
+        return true;
+      }
+
+      const ok = await rawHandleRevert(stepIndex);
+      if (!ok) return false;
+      await handleSend(
+        trimmed,
+        resolvedModel,
+        undefined,
+        settings.defaultPlannerType,
+      );
+      return true;
+    },
+    [
+      activeConv?.summary.model,
+      activeSubagentMatch?.child.model,
+      settings.defaultModel,
+      settings.defaultPlannerType,
+      rawHandleRemoveOptimistic,
+      rawHandleRevert,
+      handleSend,
+    ],
   );
 
   // ── Per-file permission response ──
@@ -395,10 +444,11 @@ function ChatView() {
 
   // ── Navigate helpers ──
   const handleNew = useCallback(() => {
+    clearPendingProject();
     navigate(`/${projectSlug ?? "unknown"}`);
     setOptimisticMessages([]);
     if (isMobile()) setSidebarOpen(false);
-  }, [navigate, projectSlug, setOptimisticMessages]);
+  }, [clearPendingProject, navigate, projectSlug, setOptimisticMessages]);
 
   const handleOpenSettings = useCallback(() => {
     navigate(`/${projectSlug ?? "unknown"}/settings`);
@@ -551,13 +601,14 @@ function ChatView() {
         conversations={conversations}
         activeId={activeId}
         onSelect={(id) => {
+          clearPendingProject();
           setOptimisticMessages([]);
           navigate(chatUrl(id));
           if (isMobile()) setSidebarOpen(false);
         }}
         onNew={handleNew}
         onNewInProject={(project) => {
-          void handleStartInProject(project);
+          handleStartInProject(project);
           if (isMobile()) setSidebarOpen(false);
         }}
         onBranchSideChat={(conv) => {
@@ -625,22 +676,6 @@ function ChatView() {
               return next;
             });
           }}
-          agentPanelOpen={agentPanelOpen}
-          onToggleAgentPanel={
-            !isSettingsPage && activeId
-              ? () => {
-                  setAgentPanelOpen((v) => {
-                    const next = !v;
-                    if (next) setWorkbenchOpen(false);
-                    return next;
-                  });
-                }
-              : undefined
-          }
-          agentCount={activeContextSubagents.length}
-          hasRunningAgent={activeContextSubagents.some(
-            (s) => s.status === "CASCADE_RUN_STATUS_RUNNING",
-          )}
           onOpenPalette={() => setPaletteOpen(true)}
         />
         {!isSettingsPage &&
@@ -809,6 +844,7 @@ function ChatView() {
             cascadeId={activeId}
             targetApp={settings.targetApp}
             onRevert={handleRevert}
+            onEditComment={handleEditComment}
             onRemoveComment={handleRemoveComment}
             onRemoveOptimistic={handleRemoveOptimistic}
             onFilePermission={handleFilePermission}
@@ -906,7 +942,14 @@ function ChatView() {
                   </svg>
                 </div>
                 <div className="chat-empty-text">会話を始めましょう</div>
-                {workspaces.length > 0 && currentWorkspaceUri ? (
+                {pendingProject ? (
+                  <div
+                    className="chat-empty-project"
+                    title={pendingProject.folderPath ?? pendingProject.name}
+                  >
+                    <IconFolder size={13} /> {pendingProject.name} で新規チャット
+                  </div>
+                ) : workspaces.length > 0 && currentWorkspaceUri ? (
                   <WorkspaceSelector
                     workspaces={workspaces}
                     selected={currentWorkspaceUri}

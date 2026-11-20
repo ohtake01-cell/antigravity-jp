@@ -131,25 +131,6 @@ export function ChatHeader({
             </span>
           </button>
         )}
-        {onToggleAgentPanel && (
-          <button
-            type="button"
-            className={`header-tool-btn header-desktop-only ${agentPanelOpen ? "active" : ""}`}
-            aria-pressed={agentPanelOpen}
-            onClick={onToggleAgentPanel}
-            title="サブエージェント・バックグラウンドタスクの稼働状況を可視化"
-            data-testid="header-agents-btn"
-          >
-            <span>🤖 エージェント</span>
-            {agentCount > 0 && (
-              <span
-                className={`header-agent-count ${hasRunningAgent ? "running" : ""}`}
-              >
-                {agentCount}
-              </span>
-            )}
-          </button>
-        )}
         {onToggleWorkbench && (
           <button
             type="button"
@@ -179,14 +160,14 @@ export function ChatHeader({
         )}
         <button
           type="button"
-          className={`header-mobile-more-btn ${workbenchOpen || agentPanelOpen || mobileToolsOpen ? "active" : ""}`}
+          className={`header-mobile-more-btn ${workbenchOpen || mobileToolsOpen ? "active" : ""}`}
           onClick={() => setMobileToolsOpen((v) => !v)}
           aria-expanded={mobileToolsOpen}
           aria-label="ツール・設定メニュー"
-          title="エージェント・エディタ・残枠・接続先メニュー"
+          title="エディタ・残枠・接続先メニュー"
         >
           <span aria-hidden="true">⋯</span>
-          {(workbenchOpen || agentPanelOpen) && (
+          {workbenchOpen && (
             <span className="header-mobile-more-dot" aria-hidden="true" />
           )}
         </button>
@@ -219,23 +200,6 @@ export function ChatHeader({
             </div>
 
             <div className="mobile-header-sheet-actions">
-              {onToggleAgentPanel && (
-                <button
-                  type="button"
-                  className={`mobile-sheet-action-btn ${agentPanelOpen ? "active" : ""}`}
-                  onClick={() => {
-                    onToggleAgentPanel();
-                    setMobileToolsOpen(false);
-                  }}
-                >
-                  <span>
-                    🤖 {agentPanelOpen ? "エージェント状況を閉じる" : "エージェント＆タスクを可視化"}
-                  </span>
-                  <span className="mobile-sheet-action-hint">
-                    {agentCount > 0 ? `${agentCount}件` : "状態・ログ"}
-                  </span>
-                </button>
-              )}
               {onToggleWorkbench && (
                 <button
                   type="button"

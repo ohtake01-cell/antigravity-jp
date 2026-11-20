@@ -32,6 +32,7 @@ import {
   IconCopy,
   IconCheck,
   IconUndo,
+  IconPencil,
   IconTrash,
   IconX,
   IconSearch,
@@ -55,6 +56,11 @@ interface Props {
   cascadeId: string;
   targetApp?: TargetApp;
   onRevert: (stepIndex: number, editText?: string) => void;
+  onEditComment?: (
+    stepIndex: number,
+    editedText: string,
+    optimisticId?: string,
+  ) => Promise<boolean> | void;
   onRemoveComment?: (stepIndex: number) => void;
   onRemoveOptimistic?: (optimisticId: string, restoreDraft?: string) => void;
   onFilePermission: (
@@ -636,6 +642,11 @@ interface MessageBubbleProps {
   isUnconfirmed: boolean;
   suppressImplementationPlan?: boolean;
   onRevert: (stepIndex: number, editText?: string) => void;
+  onEditComment?: (
+    stepIndex: number,
+    editedText: string,
+    optimisticId?: string,
+  ) => Promise<boolean> | void;
   onRemoveComment?: (stepIndex: number) => void;
   onRemoveOptimistic?: (optimisticId: string, restoreDraft?: string) => void;
   onImageClick: (src: string) => void;
@@ -648,16 +659,32 @@ const MessageBubble = memo(
     isUnconfirmed,
     suppressImplementationPlan = false,
     onRevert,
+    onEditComment,
     onRemoveComment,
     onRemoveOptimistic,
     onImageClick,
   }: MessageBubbleProps) {
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState(msg.content);
+    const [isSavingEdit, setIsSavingEdit] = useState(false);
+    const editInputRef = useRef<HTMLTextAreaElement>(null);
+
     useEffect(() => {
       if (!confirmDelete) return;
       const timer = setTimeout(() => setConfirmDelete(false), 3500);
       return () => clearTimeout(timer);
     }, [confirmDelete]);
+
+    useEffect(() => {
+      if (!isEditing) return;
+      const el = editInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(Math.max(el.scrollHeight, 68), 320)}px`;
+    }, [isEditing]);
 
     const renderedContent = useMemo(
       () => (msg.content ? renderMarkdown(msg.content) : ""),
@@ -701,11 +728,44 @@ const MessageBubble = memo(
     const canRemoveCommitted = isUser && msg.stepIndex >= 0 && Boolean(onRemoveComment);
     const canRevertLocal = isUser && isOptimisticLocal && Boolean(onRemoveOptimistic);
     const canRemoveLocal = isUser && isOptimisticLocal && Boolean(onRemoveOptimistic);
+    const canEditUser =
+      isUser && (canRevertCommitted || canRevertLocal) && Boolean(onEditComment);
     const revertDisabled = isLocked && !isFailedLocal;
+
+    const handleStartEdit = () => {
+      if (revertDisabled || !canEditUser) return;
+      setConfirmDelete(false);
+      setEditValue(msg.content);
+      setIsEditing(true);
+    };
+
+    const handleCancelEdit = () => {
+      setIsEditing(false);
+      setIsSavingEdit(false);
+      setEditValue(msg.content);
+    };
+
+    const handleSubmitEdit = async () => {
+      const trimmed = editValue.trim();
+      if (!trimmed || isSavingEdit || !onEditComment) return;
+      setIsSavingEdit(true);
+      try {
+        const result = await onEditComment(
+          msg.stepIndex,
+          trimmed,
+          isOptimisticLocal ? msg.optimisticId : undefined,
+        );
+        if (result !== false) {
+          setIsEditing(false);
+        }
+      } finally {
+        setIsSavingEdit(false);
+      }
+    };
 
     return (
       <div
-        className={`message ${msg.role}${isUnconfirmed ? " unconfirmed" : ""}${isFailedLocal ? " failed" : ""}`}
+        className={`message ${msg.role}${isUnconfirmed ? " unconfirmed" : ""}${isFailedLocal ? " failed" : ""}${isEditing ? " editing" : ""}`}
       >
         <div className={isUser ? "chat-block message-body" : "message-body"}>
           {showImplementationPlan && msg.thinking && (
@@ -717,9 +777,65 @@ const MessageBubble = memo(
           {msg.media && msg.media.length > 0 && (
             <MediaThumbs media={msg.media} onImageClick={onImageClick} />
           )}
-          {msg.content && <MarkdownContent html={renderedContent} />}
-          {msg.content && (
+          {isEditing ? (
+            <div className="msg-edit-box">
+              <textarea
+                ref={editInputRef}
+                className="msg-edit-textarea"
+                value={editValue}
+                disabled={isSavingEdit}
+                aria-label="コメントを編集"
+                onChange={(e) => {
+                  setEditValue(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(Math.max(e.target.scrollHeight, 68), 320)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    handleCancelEdit();
+                  } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    void handleSubmitEdit();
+                  }
+                }}
+              />
+              <div className="msg-edit-actions">
+                <button
+                  type="button"
+                  className="msg-action-pill"
+                  onClick={handleCancelEdit}
+                  disabled={isSavingEdit}
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  className="msg-action-pill primary"
+                  onClick={() => void handleSubmitEdit()}
+                  disabled={isSavingEdit || !editValue.trim()}
+                >
+                  {isSavingEdit ? "送信中..." : "保存して再送信"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            msg.content && <MarkdownContent html={renderedContent} />
+          )}
+          {!isEditing && msg.content && (
             <div className="msg-actions">
+              {canEditUser && (
+                <button
+                  type="button"
+                  className={`msg-action-pill ${revertDisabled ? "locked" : ""}`}
+                  onClick={handleStartEdit}
+                  title="このコメントをその場で編集して再送信する"
+                  disabled={revertDisabled}
+                >
+                  <IconPencil size={12} />
+                  <span>編集</span>
+                </button>
+              )}
               {(canRevertCommitted || canRevertLocal) && (
                 <button
                   type="button"
@@ -792,6 +908,7 @@ const MessageBubble = memo(
     prev.isLocked === next.isLocked &&
     prev.isUnconfirmed === next.isUnconfirmed &&
     prev.suppressImplementationPlan === next.suppressImplementationPlan &&
+    prev.onEditComment === next.onEditComment &&
     prev.onRemoveComment === next.onRemoveComment &&
     prev.onRemoveOptimistic === next.onRemoveOptimistic,
 );
@@ -853,6 +970,7 @@ export function ChatPanel({
   cascadeId,
   targetApp = "all",
   onRevert,
+  onEditComment,
   onRemoveComment,
   onRemoveOptimistic,
   onFilePermission,
@@ -874,6 +992,7 @@ export function ChatPanel({
     steps: rawSteps,
     baseOffset,
     loading,
+    error: stepsError,
     refresh,
     hardRefresh,
     hasMore,
@@ -1180,6 +1299,41 @@ export function ChatPanel({
     );
   }
 
+  if (messages.length === 0 && stepsError) {
+    return (
+      <div className="chat-area">
+        <div className="chat-empty">
+          <div className="chat-empty-icon">
+            <IconMessageCircle size={48} />
+          </div>
+          <div className="chat-empty-text">
+            チャットの読み込みに失敗しました（自動再接続中…）
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              opacity: 0.7,
+              maxWidth: 420,
+              textAlign: "center",
+              wordBreak: "break-word",
+            }}
+          >
+            {stepsError}
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ marginTop: 14, padding: "6px 14px", borderRadius: 8 }}
+            onClick={hardRefresh}
+          >
+            再読み込み
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (messages.length === 0) {
     return (
       <div className="chat-area">
@@ -1283,6 +1437,7 @@ export function ChatPanel({
                   pinnedImplementationPlan?.stepIndex === msg.stepIndex
                 }
                 onRevert={onRevert}
+                onEditComment={onEditComment}
                 onRemoveComment={onRemoveComment}
                 onRemoveOptimistic={onRemoveOptimistic}
                 onImageClick={setLightboxSrc}

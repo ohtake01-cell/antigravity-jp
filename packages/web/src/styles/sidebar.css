@@ -334,11 +334,19 @@
   justify-content: center;
 }
 
-/* ── Sidebar list ── */
+/* ── Sidebar unified scroll body & list ── */
+
+.sidebar-scroll-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+}
 
 .sidebar-list {
-  flex: 1;
-  overflow-y: auto;
+  flex: 1 0 auto;
   padding: 8px;
 }
 
@@ -709,9 +717,11 @@
 }
 
 .sidebar-subagents-toggle.running {
-  border-color: rgba(52, 211, 153, 0.45);
-  background: rgba(52, 211, 153, 0.12);
-  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.58);
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.25);
+  animation: sidebarAgentGlow 1.9s ease-in-out infinite;
 }
 
 .sidebar-subagents-list {
@@ -752,7 +762,31 @@
 }
 
 .sidebar-subagent-item.running {
-  color: #34d399;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.42);
+  border-left: 3px solid #34d399;
+  font-weight: 600;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.24);
+  animation: sidebarAgentGlow 1.8s ease-in-out infinite;
+}
+
+.sidebar-subagent-item.running .sidebar-subagent-title {
+  color: #a7f3d0;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.65);
+}
+
+@keyframes sidebarAgentGlow {
+  0%, 100% {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(52, 211, 153, 0.36);
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.2);
+  }
+  50% {
+    background: rgba(16, 185, 129, 0.24);
+    border-color: rgba(52, 211, 153, 0.72);
+    box-shadow: 0 0 18px rgba(52, 211, 153, 0.48);
+  }
 }
 
 .sidebar-subagent-icon {
@@ -1090,4 +1124,37 @@ button.sidebar-pin-badge:hover {
 
 .sidebar-agent-detail-link:hover {
   color: #93c5fd;
+}
+
+.sidebar-projects-bar {
+  padding: 4px 2px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 7px;
+  padding: 5px 6px;
+}
+
+.project-group-header:hover {
+  background: var(--bg-hover);
+}
+
+.project-group-header .workspace-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group-header .sidebar-project-row-actions {
+  margin-left: auto;
 }

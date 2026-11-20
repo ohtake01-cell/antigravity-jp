@@ -199,12 +199,20 @@ server.listen(PORT, HOST, () => {
   console.log(`✅ Antigravity 日本語版が待機中です: ${listenAddress}`);
 });
 
-process.on("SIGTERM", () => {
+function gracefulExit() {
   stopStandaloneCore();
-  process.exit(0);
-});
+  const forceTimer = setTimeout(() => {
+    process.exit(0);
+  }, 500);
+  forceTimer.unref();
+  try {
+    server.close(() => {
+      process.exit(0);
+    });
+  } catch {
+    process.exit(0);
+  }
+}
 
-process.on("SIGINT", () => {
-  stopStandaloneCore();
-  process.exit(0);
-});
+process.on("SIGTERM", gracefulExit);
+process.on("SIGINT", gracefulExit);

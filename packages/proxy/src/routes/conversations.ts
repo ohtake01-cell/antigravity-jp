@@ -13,6 +13,7 @@ import {
   normalizeWorkspaceId,
   rpcForConversation,
   getStepCount,
+  getTrajectorySummary,
   extractTargetAppDataDir,
 } from "../routing.js";
 import {
@@ -173,7 +174,16 @@ async function getLastStepGeneratorModel(
   }
 
   try {
-    const stepOffset = stepCount > 0 ? Math.max(0, stepCount - 10) : 0;
+    let effectiveCount = stepCount;
+    if (effectiveCount <= 0) {
+      const summary = await getTrajectorySummary(id, inst, true);
+      effectiveCount = summary?.count ?? 0;
+    }
+    if (effectiveCount <= 0) {
+      stepGeneratorModelCache.set(id, { cacheKey, model: null });
+      return null;
+    }
+    const stepOffset = Math.max(0, effectiveCount - 10);
     const data = await rpc.call<{
       steps?: Array<{ metadata?: { generatorModel?: string } }>;
     }>(
@@ -572,6 +582,31 @@ export function registerConversationRoutes(app: Hono): void {
               const annotations = (normalizedSummary.annotations ?? {}) as Record<string, unknown>;
               const diskAnnotation = diskAnnotationsMap.get(id);
               if (annotations.archived === true || diskAnnotation?.archived === true) {
+                excludedIds.add(id);
+                continue;
+              }
+
+              // 2b. Exclude empty untitled 0-step shell cascades with no timestamp/annotation
+              // (these otherwise render as blank "NaN日前 · ステップ" rows in the sidebar).
+              const rawSummaryText =
+                typeof normalizedSummary.summary === "string"
+                  ? normalizedSummary.summary.trim()
+                  : "";
+              const rawStepCount =
+                typeof normalizedSummary.stepCount === "number"
+                  ? normalizedSummary.stepCount
+                  : 0;
+              const rawLastModified =
+                typeof normalizedSummary.lastModifiedTime === "string"
+                  ? normalizedSummary.lastModifiedTime.trim()
+                  : "";
+              if (
+                !rawSummaryText &&
+                rawStepCount === 0 &&
+                !rawLastModified &&
+                normalizedSummary.status !== "CASCADE_RUN_STATUS_RUNNING" &&
+                !diskAnnotation
+              ) {
                 excludedIds.add(id);
                 continue;
               }
@@ -1320,9 +1355,15 @@ export function registerConversationRoutes(app: Hono): void {
           );
         }
       } else {
-        // No workspace specified — pick first available LS and auto-inject
-        targetInstance = instances[0];
-        workspaceUri = await discoverSingleWorkspaceUri(instances);
+        // No workspace specified — pick first healthy available LS.
+        // Only auto-inject a single workspace URI when no explicit projectId
+        // (such as "default-cli-project") was requested.
+        targetInstance =
+          instances.find((i) => i.modelCount === undefined || i.modelCount > 0) ??
+          instances[0];
+        if (!body.projectId) {
+          workspaceUri = await discoverSingleWorkspaceUri(instances);
+        }
       }
 
       const startWorkspaceUris =
