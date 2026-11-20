@@ -1,0 +1,613 @@
+/* ── Chat input ── */
+
+.chat-input-area {
+  padding: 8px 20px 16px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.chat-input-model-row {
+  max-width: 860px;
+  margin: 0 auto 4px;
+  width: 100%;
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-input-wrap {
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 10px;
+  min-height: 54px;
+  transition: border-color var(--transition-fast);
+}
+
+.chat-input-wrap:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.12);
+}
+
+.chat-input-top {
+  width: 100%;
+}
+
+.chat-input-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-input-bottom-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-input-bottom-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 6px;
+}
+
+.chat-input-bottom-right .model-selector-dropdown {
+  right: 0;
+  left: auto;
+}
+
+.chat-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  max-height: 200px;
+  min-height: 26px;
+  padding: 2px 0;
+  caret-color: var(--accent);
+  /* Fix WebKit/iOS Safari bug where cursor goes behind placeholder and prevents typing in flex containers */
+  transform: translateZ(0);
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+.chat-input::placeholder {
+  color: var(--text-tertiary);
+  /* Prevent interaction bugs with the placeholder itself */
+  pointer-events: none;
+  user-select: none;
+}
+
+.chat-send-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--text-on-solid);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px;
+  transition:
+    background var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.chat-stop-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgb(var(--c-error) / 0.3);
+  border-radius: var(--radius-sm);
+  background: rgb(var(--c-error) / 0.1);
+  color: rgb(var(--c-error));
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 9px;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.chat-stop-btn:hover {
+  background: rgb(var(--c-error) / 0.2);
+  border-color: rgb(var(--c-error) / 0.5);
+}
+
+/* ── Attach button ── */
+
+.chat-action-icon-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.chat-action-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Drag over ── */
+
+.chat-input-area.drag-over .chat-input-wrap {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.12);
+}
+
+/* ── File error toast ── */
+
+.file-error-toast {
+  max-width: 860px;
+  margin: 0 auto 6px;
+  width: 100%;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: rgb(var(--c-error));
+  background: rgb(var(--c-error) / 0.08);
+  border: 1px solid rgb(var(--c-error) / 0.2);
+  border-radius: var(--radius-sm);
+  animation: toast-slide-in 0.2s ease-out;
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Attachment previews ── */
+
+.attachment-previews {
+  max-width: 860px;
+  margin: 0 auto 6px;
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  padding: 0 2px;
+  flex-wrap: wrap;
+}
+
+.attachment-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-on-solid);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.attachment-thumb:hover .attachment-remove {
+  opacity: 1;
+}
+
+/* ── Model selector ── */
+
+.model-selector {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.model-selector-btn {
+  background: rgb(var(--c-lift) / 0.04);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  line-height: 1;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  min-width: 0;
+  max-width: 260px;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.model-selector-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.model-selector-base {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-selector-base-short {
+  display: none;
+}
+
+.model-selector-tier-pill {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-accent, #93c5fd);
+}
+
+.model-selector-btn:hover {
+  color: var(--text-primary);
+  background: rgb(var(--c-lift) / 0.08);
+  border-color: var(--border-focus);
+}
+
+.model-selector-caret {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.model-selector-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  min-width: 290px;
+  max-width: min(92vw, 380px);
+  max-height: min(68vh, 540px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  width: max-content;
+  padding: 4px;
+  z-index: 100;
+}
+
+.model-family-row {
+  padding: 6px 10px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.model-family-row:hover {
+  background: rgb(var(--c-lift) / 0.03);
+}
+
+.model-family-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.model-tier-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.model-tier-btn {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: rgb(var(--c-lift) / 0.04);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  line-height: 1.3;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.model-tier-btn:hover {
+  background: rgb(var(--c-lift) / 0.1);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+
+.model-tier-btn.active {
+  background: rgb(var(--c-accent) / 0.18);
+  color: var(--text-accent, #93c5fd);
+  border-color: rgb(var(--c-accent) / 0.55);
+  font-weight: 700;
+}
+
+.model-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  text-align: left;
+}
+
+.model-option:hover {
+  background: rgb(var(--c-lift) / 0.05);
+}
+
+.model-option.active {
+  background: rgb(var(--c-accent) / 0.12);
+  color: var(--text-accent);
+}
+
+.model-option-label {
+  flex: 1;
+}
+
+.model-option-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 8px;
+}
+
+.model-quota {
+  font-weight: 600;
+}
+
+/* ── Connection status bar ── */
+
+/* ── Voice input button ── */
+.chat-voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chat-voice-btn.recording {
+  color: #fff;
+  background: rgba(239, 68, 68, 0.9);
+  border-radius: 999px;
+  padding: 4px 10px;
+  animation: porta-voice-pulse 1.3s ease-in-out infinite;
+}
+
+.chat-voice-rec-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@keyframes porta-voice-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(239, 68, 68, 0);
+  }
+}
+
+/* ── Local Permissions selector (Japanese Antigravity 4-mode menu) ── */
+
+.permission-selector-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.permission-selector-icon {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.88;
+}
+
+.permission-dropdown {
+  min-width: 280px;
+  padding: 6px;
+}
+
+.permission-dropdown-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+}
+
+.permission-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.permission-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.permission-option.active .permission-option-icon {
+  color: var(--text-primary);
+}
+
+.permission-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.permission-option-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.permission-option .model-option-label {
+  flex: 0 1 auto;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.permission-option .model-option-meta {
+  margin-left: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+  white-space: normal;
+}
+
+.permission-default-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.permission-option-check {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-primary);
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+/* ── Antigravity-style Audio Orb button (音声で即送信 ⌃M) ── */
+
+.chat-audio-orb-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(59, 130, 246, 0.45);
+  background: #f8fafc;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+
+.chat-audio-orb-btn:hover:not(:disabled) {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+}
+
+.chat-audio-orb-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-audio-orb-btn.recording {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: rgba(239, 68, 68, 0.65);
+  animation: porta-voice-pulse 1.3s ease-in-out infinite;
+}
+
+.chat-audio-orb-btn.transcribing {
+  background: #1e293b;
+  color: #e2e8f0;
+}

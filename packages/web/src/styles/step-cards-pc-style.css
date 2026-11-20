@@ -1,0 +1,159 @@
+/* ── PC-Style Minimalist Step Cards & Groups (Antigravity Official Style) ── */
+
+.system-group-container {
+  margin: 4px 0 !important;
+  width: 100% !important;
+}
+
+.system-group-details {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.system-group-summary {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-height: 24px !important;
+  padding: 2px 6px !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  list-style: none !important;
+  font-size: 11.5px !important;
+  color: var(--text-tertiary, #888899) !important;
+  background: transparent !important;
+  border-radius: 4px !important;
+  transition: color 0.15s ease, background 0.15s ease !important;
+}
+
+.system-group-summary::-webkit-details-marker {
+  display: none !important;
+}
+
+.system-group-summary:hover {
+  color: var(--text-secondary, #bbbbcc) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.system-group-icon {
+  display: none !important; /* PC版と同じくアイコンなしでシンプルに */
+}
+
+.system-group-label {
+  font-weight: 500 !important;
+  color: inherit !important;
+}
+
+.system-group-meta {
+  font-size: 11px !important;
+  color: var(--text-tertiary, #888899) !important;
+  opacity: 0.78 !important;
+}
+
+.system-group-live-dot {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: #34d399 !important;
+  box-shadow: 0 0 6px #34d399 !important;
+  flex-shrink: 0 !important;
+}
+
+.system-group-chevron {
+  display: inline-flex !important;
+  align-items: center !important;
+  font-size: 11px !important;
+  opacity: 0.75 !important;
+  transition: transform 0.15s ease !important;
+}
+
+.system-group-details[open] > .system-group-summary .system-group-chevron {
+  transform: rotate(90deg) !important;
+}
+
+.system-group-action {
+  display: none !important; /* 「展開する」テキストは消して矢印だけ */
+}
+
+.system-group-details[open] .system-group-summary {
+  color: var(--text-secondary, #bbbbcc) !important;
+  margin-bottom: 6px !important;
+}
+
+.system-group-content {
+  padding: 6px 8px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  border-left: 2px solid var(--border-subtle, #33333e) !important;
+  border-top: none !important;
+  border-radius: 0 4px 4px 0 !important;
+  margin-left: 4px !important;
+}
+
+/* 単体の step-card も枠線を控えめ・コンパクトに */
+.step-card {
+  border-radius: 4px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+}
+
+.step-card-header {
+  padding: 6px 10px !important;
+  font-size: 11.5px !important;
+}
+
+.step-card-cwd {
+  padding: 2px 10px 6px !important;
+  font-size: 11px !important;
+  color: var(--text-tertiary, #666677) !important;
+}
+
+/* Implementation Plan も PC風の1行コンパクト折りたたみに */
+.implementation-plan-block {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 1px 0 3px !important;
+}
+
+.implementation-plan-header {
+  min-height: 22px !important;
+  padding: 2px 6px !important;
+  font-size: 11.5px !important;
+  color: var(--text-tertiary, #888899) !important;
+  background: transparent !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  max-width: 100% !important;
+  cursor: pointer !important;
+}
+
+.implementation-plan-header:hover {
+  color: var(--text-secondary, #bbbbcc) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.implementation-plan-icon {
+  display: none !important;
+}
+
+.implementation-plan-action {
+  display: none !important;
+}
+
+.implementation-plan-content {
+  background: rgba(0, 0, 0, 0.18) !important;
+  border-left: 2px solid var(--border-subtle, #33333e) !important;
+  border-top: none !important;
+  border-radius: 0 6px 6px 0 !important;
+  padding: 8px 12px !important;
+  margin: 4px 0 4px 8px !important;
+}

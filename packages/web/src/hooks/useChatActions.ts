@@ -1,0 +1,313 @@
+import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../api/client";
+import { draftStore } from "./useDraftText";
+import { resolvePlannerType } from "../utils/autoPlanner";
+import { slugFromUri } from "./useWorkspaces";
+import type {
+  ChatMessage,
+  LocalPermissionPolicy,
+  MediaAttachment,
+  ProjectEntry,
+} from "../types";
+import type { PlannerType } from "../components/ChatInput";
+import { DEFAULT_MODEL } from "../constants";
+
+interface UseChatActionsArgs {
+  activeId: string | null;
+  currentWorkspaceUri: string | undefined;
+  projectSlug: string | undefined;
+  refresh: () => void;
+  conversations: {
+    id: string;
+    summary: {
+      stepCount?: number;
+      workspaces?: { workspaceFolderAbsoluteUri?: string }[];
+    };
+  }[];
+  optimisticRemove?: (id: string) => void;
+}
+
+interface UseChatActionsResult {
+  optimisticMessages: ChatMessage[];
+  setOptimisticMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  confirmOptimisticMessages: (ids: string[]) => void;
+  clearOptimisticMessages: () => void;
+  stepsRefreshKey: number;
+  hardRefreshKey: number;
+  handleSend: (
+    text: string,
+    model: string | null,
+    media?: MediaAttachment[],
+    plannerType?: PlannerType,
+    granted?: boolean,
+    autoExecutionPolicy?: LocalPermissionPolicy,
+  ) => Promise<void>;
+  handleStartInProject: (project: ProjectEntry) => Promise<void>;
+  handleStop: () => Promise<void>;
+
+  handleRevert: (stepIndex: number, draftContent?: string) => Promise<boolean>;
+  handleRemoveOptimistic: (optimisticId: string) => void;
+  handleDelete: (id: string) => Promise<void>;
+  chatUrl: (convId: string) => string;
+  /** Trigger a non-destructive step re-fetch (e.g. after permission approval). */
+  triggerSoftRefresh: () => void;
+}
+
+/**
+ * All chat mutation actions: send, stop, revert, delete.
+ * Also manages optimistic messages and confirmation state.
+ */
+export function useChatActions({
+  activeId,
+  currentWorkspaceUri,
+  projectSlug,
+  refresh,
+  conversations,
+  optimisticRemove,
+}: UseChatActionsArgs): UseChatActionsResult {
+  const navigate = useNavigate();
+
+  const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>(
+    [],
+  );
+  const [stepsRefreshKey, setStepsRefreshKey] = useState(0);
+  const [hardRefreshKey, setHardRefreshKey] = useState(0);
+
+  const clearOptimisticMessages = useCallback(() => {
+    setOptimisticMessages([]);
+  }, []);
+
+  const confirmOptimisticMessages = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const confirmedIds = new Set(ids);
+    setOptimisticMessages((prev) =>
+      prev.filter(
+        (msg) =>
+          !(
+            msg.role === "user" &&
+            msg.optimisticId &&
+            confirmedIds.has(msg.optimisticId)
+          ),
+      ),
+    );
+  }, []);
+
+  // Build a chat URL for the given conversation ID
+  const chatUrl = useCallback(
+    (convId: string): string => {
+      const conv = conversations.find((c) => c.id === convId);
+      const ws = conv?.summary.workspaces?.[0];
+      const uri = ws?.workspaceFolderAbsoluteUri;
+      const slug = uri ? slugFromUri(uri) : (projectSlug ?? "unknown");
+      return `/${slug}/${convId}`;
+    },
+    [conversations, projectSlug],
+  );
+
+  const handleSend = useCallback(
+    async (
+      text: string,
+      model: string | null,
+      media?: MediaAttachment[],
+      plannerType?: PlannerType,
+      granted = false,
+      autoExecutionPolicy?: LocalPermissionPolicy,
+    ) => {
+      const trimmed = text.trim();
+      if (!trimmed && (!media || media.length === 0)) return;
+
+      const optimisticId =
+        globalThis.crypto?.randomUUID?.() ??
+        `optimistic-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const optimistic: ChatMessage = {
+        role: "user",
+        content: trimmed,
+        stepIndex: -1,
+        type: "CORTEX_STEP_TYPE_USER_INPUT",
+        optimisticId,
+        optimisticState: "unconfirmed",
+        media: media?.map((m) => ({
+          mimeType: m.mimeType,
+          inlineData: m.inlineData,
+        })),
+      };
+      setOptimisticMessages((prev) => [...prev, optimistic]);
+
+      try {
+        let cascadeId = activeId;
+
+        // Lazy session creation: create on first message
+        if (!cascadeId) {
+          const result = await api.startConversation(
+            currentWorkspaceUri || undefined,
+            granted,
+          );
+          cascadeId = result.cascadeId;
+          navigate(`/${projectSlug}/${cascadeId}`, { replace: true });
+        }
+
+        const resolvedPlanner = plannerType
+          ? resolvePlannerType(plannerType, trimmed)
+          : undefined;
+        if (autoExecutionPolicy) {
+          await api.sendMessage(
+            cascadeId,
+            [{ type: "text", text: trimmed || " " }],
+            optimisticId,
+            model ?? undefined,
+            media && media.length > 0 ? media : undefined,
+            resolvedPlanner,
+            granted,
+            autoExecutionPolicy,
+          );
+        } else {
+          await api.sendMessage(
+            cascadeId,
+            [{ type: "text", text: trimmed || " " }],
+            optimisticId,
+            model ?? undefined,
+            media && media.length > 0 ? media : undefined,
+            resolvedPlanner,
+            granted,
+          );
+        }
+        draftStore.delete(cascadeId);
+        setStepsRefreshKey((k) => k + 1);
+        refresh();
+      } catch (err) {
+        console.error("Failed to send message:", err);
+        setOptimisticMessages((prev) =>
+          prev.map((msg) =>
+            msg.optimisticId === optimisticId
+              ? { ...msg, optimisticState: "failed" }
+              : msg,
+          ),
+        );
+        const errorMsg: ChatMessage = {
+          role: "system",
+          content: `送信に失敗しました: ${err instanceof Error ? err.message : "不明なエラー"}`,
+          stepIndex: -2,
+          type: "error",
+          icon: "alert",
+          optimisticId: `${optimisticId}-error`,
+        };
+        setOptimisticMessages((prev) => [...prev, errorMsg]);
+      }
+    },
+    [activeId, refresh, currentWorkspaceUri, projectSlug, navigate],
+  );
+
+  const handleStop = useCallback(async () => {
+    if (!activeId) return;
+    try {
+      await api.stop(activeId);
+      setHardRefreshKey((k) => k + 1);
+      refresh();
+    } catch (err) {
+      console.error("Failed to stop:", err);
+    }
+  }, [activeId, refresh]);
+
+  const handleRemoveOptimistic = useCallback((optimisticId: string) => {
+    setOptimisticMessages((prev) =>
+      prev.filter(
+        (msg) =>
+          msg.optimisticId !== optimisticId &&
+          msg.optimisticId !== `${optimisticId}-error`,
+      ),
+    );
+  }, []);
+
+  const handleRevert = useCallback(
+    async (stepIndex: number, draftContent?: string): Promise<boolean> => {
+      if (!activeId) return false;
+      try {
+        const targetStep = Math.max(0, stepIndex - 1);
+        await api.revert(activeId, targetStep, DEFAULT_MODEL);
+        setOptimisticMessages([]);
+        refresh();
+        setHardRefreshKey((k) => k + 1);
+        // Draft text restoration is handled by the caller
+        if (draftContent) {
+          draftStore.set(activeId, draftContent);
+        }
+        return true;
+      } catch (err) {
+        console.error("Failed to revert:", err);
+        const errId = `revert-err-${Date.now()}`;
+        setOptimisticMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `コメントの戻し／除去に失敗しました: ${err instanceof Error ? err.message : "不明なエラー"}`,
+            stepIndex: -2,
+            type: "error",
+            icon: "alert",
+            optimisticId: errId,
+          },
+        ]);
+        return false;
+      }
+    },
+    [activeId, refresh],
+  );
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await api.deleteConversation(id);
+        optimisticRemove?.(id);
+        if (activeId === id) {
+          navigate(`/${projectSlug ?? "unknown"}`);
+        }
+        refresh();
+      } catch (err) {
+        console.error("Failed to delete:", err);
+      }
+    },
+    [activeId, refresh, navigate, projectSlug, optimisticRemove],
+  );
+
+  const handleStartInProject = useCallback(
+    async (project: ProjectEntry) => {
+      try {
+        const result = await api.startConversation(
+          project.folderUri || undefined,
+          true,
+          project.id,
+        );
+        const slug = project.folderUri
+          ? slugFromUri(project.folderUri)
+          : (projectSlug ?? "unknown");
+        setOptimisticMessages([]);
+        navigate(`/${slug}/${result.cascadeId}`);
+        refresh();
+      } catch (err) {
+        console.error("Failed to start conversation in project:", err);
+      }
+    },
+    [navigate, projectSlug, refresh],
+  );
+
+  const triggerSoftRefresh = useCallback(() => {
+    setStepsRefreshKey((k) => k + 1);
+  }, []);
+
+  return {
+    optimisticMessages,
+    setOptimisticMessages,
+    confirmOptimisticMessages,
+    clearOptimisticMessages,
+    stepsRefreshKey,
+    hardRefreshKey,
+    handleSend,
+    handleStartInProject,
+    handleStop,
+    handleRevert,
+    handleRemoveOptimistic,
+    handleDelete,
+    chatUrl,
+    triggerSoftRefresh,
+  };
+}

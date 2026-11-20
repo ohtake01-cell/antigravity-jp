@@ -1,0 +1,716 @@
+/* ── Gemini Mobile & Token Quota Styles ── */
+
+:root {
+  --c-gemini-blue: #1a73e8;
+  --c-gemini-purple: #8ab4f8;
+  --c-gemini-sparkle: #60a5fa;
+  --c-gemini-aurora-1: rgba(66, 133, 244, 0.15);
+  --c-gemini-aurora-2: rgba(147, 51, 234, 0.12);
+}
+
+/* ── Token Quota Badge & Popover ── */
+.token-quota-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.token-quota-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.token-quota-badge:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.token-quota-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.token-quota-pct {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.token-quota-mini-bar {
+  width: 24px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.token-quota-mini-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+.token-quota-time-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* ── Popover Details ── */
+.token-quota-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  background: var(--bg-surface, #1e2230);
+  border: 1px solid var(--border-default, #353b4e);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+  z-index: 1000;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: quotaFadeIn 0.15s ease-out;
+}
+
+@keyframes quotaFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.token-quota-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.token-quota-popover-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.token-quota-popover-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.token-quota-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.token-quota-popover-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.token-quota-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.token-quota-model-name {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.token-quota-item-pct {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.token-quota-bar-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.token-quota-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+.token-quota-item-reset {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* ── Mobile Gemini-Style Aurora, Large-Font Safe Layout & Long-Press Context Menu ── */
+
+/* Sidebar Pin Badge, Context Menu & Inline Rename (Desktop + Mobile) */
+.sidebar-pin-badge {
+  display: inline-block;
+  margin-right: 5px;
+  font-size: 11px;
+  vertical-align: baseline;
+}
+
+.sidebar-item {
+  position: relative;
+  -webkit-touch-callout: none;
+}
+
+.sidebar-item.menu-open {
+  background: var(--bg-active, rgba(255, 255, 255, 0.08));
+}
+
+.sidebar-item-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow: hidden;
+  line-height: 1.35;
+}
+
+/* ── Running / Thinking Conversation Pulse & Spinner ── */
+.sidebar-item.running {
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-left: 3.5px solid #60a5fa;
+  animation: runningItemPulse 2s ease-in-out infinite;
+}
+
+@keyframes runningItemPulse {
+  0%, 100% {
+    background: rgba(96, 165, 250, 0.07);
+    border-color: rgba(96, 165, 250, 0.25);
+  }
+  50% {
+    background: rgba(96, 165, 250, 0.16);
+    border-color: rgba(96, 165, 250, 0.55);
+  }
+}
+
+/* ★ 現在開いているチャット（操作中・閲覧中）が動いている場合の際立つグリーン表示 */
+.sidebar-item.running.active-running {
+  background: rgba(16, 185, 129, 0.12) !important;
+  border: 1px solid rgba(52, 211, 153, 0.45) !important;
+  border-left: 4px solid #34d399 !important;
+  animation: activeRunningPulse 1.8s ease-in-out infinite !important;
+}
+
+@keyframes activeRunningPulse {
+  0%, 100% {
+    background: rgba(16, 185, 129, 0.12);
+    box-shadow: 0 0 14px rgba(52, 211, 153, 0.25);
+  }
+  50% {
+    background: rgba(16, 185, 129, 0.24);
+    box-shadow: 0 0 22px rgba(52, 211, 153, 0.45);
+  }
+}
+
+/* チャット名自体の点滅アニメーション (バックグラウンド: ブルー) */
+.sidebar-title-blinking {
+  display: inline;
+  animation: chatTitleBlink 1.4s ease-in-out infinite;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+@keyframes chatTitleBlink {
+  0%, 100% {
+    opacity: 1;
+    color: #60a5fa;
+    text-shadow: 0 0 10px rgba(96, 165, 250, 0.7);
+  }
+  50% {
+    opacity: 0.35;
+    color: #93c5fd;
+    text-shadow: none;
+  }
+}
+
+/* ★ 現在開いているチャット用のエメラルドグリーン点滅 */
+.sidebar-title-blinking.active-chat {
+  animation: activeChatTitleBlink 1.2s ease-in-out infinite;
+  color: #34d399;
+  text-shadow: 0 0 12px rgba(52, 211, 153, 0.85);
+}
+
+@keyframes activeChatTitleBlink {
+  0%, 100% {
+    opacity: 1;
+    color: #34d399;
+    text-shadow: 0 0 12px rgba(52, 211, 153, 0.9);
+  }
+  50% {
+    opacity: 0.35;
+    color: #a7f3d0;
+    text-shadow: none;
+  }
+}
+
+/* チャット名横のぐるぐる回転スピナー */
+.sidebar-running-spinner-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  vertical-align: middle;
+  color: var(--c-gemini-sparkle, #4da3ff);
+}
+
+.sidebar-running-spinner {
+  animation: icon-spin 0.9s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(77, 163, 255, 0.8));
+}
+
+.sidebar-running-spinner.active-chat {
+  color: #34d399 !important;
+  filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.9)) !important;
+}
+
+/* メタ情報欄の実行中ステータス */
+.sidebar-running-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.sidebar-running-status-label.active-chat {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.sidebar-running-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  animation: runningDotPulse 1s ease-in-out infinite;
+}
+
+.sidebar-running-dot.active-chat {
+  background-color: #34d399;
+  box-shadow: 0 0 10px #34d399;
+}
+
+@keyframes runningDotPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.65);
+    opacity: 0.4;
+  }
+}
+
+/* ── Pinned Workspace Group Header at the Top ── */
+.pinned-workspace-group {
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pinned-group-header {
+  color: #93c5fd !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.3px;
+}
+
+.pinned-group-header .workspace-group-count {
+  background: rgba(96, 165, 250, 0.2);
+  color: #93c5fd;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  font-weight: 700;
+}
+
+.sidebar-meta-project {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.sidebar-item-menu-btn {
+  display: inline-flex !important;
+  opacity: 0.75;
+  width: 28px;
+  height: 28px;
+}
+
+.context-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 210px;
+  max-width: min(260px, 82vw);
+  background: var(--bg-surface, #1e2230);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+  padding: 6px;
+  z-index: 1200;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.context-menu-header {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.context-menu-item:hover,
+.context-menu-item:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-rename-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.sidebar-rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(15, 17, 23, 0.9);
+  color: var(--text-primary);
+  border: 1px solid var(--c-gemini-sparkle, #60a5fa);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 14px;
+  outline: none;
+}
+
+.sidebar-rename-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.sidebar-rename-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+.sidebar-rename-btn.save {
+  background: var(--c-gemini-blue, #1a73e8);
+  color: #fff;
+  border-color: transparent;
+}
+
+.sidebar-rename-btn.cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+/* Model Selector overflow protection */
+.model-selector-btn {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.model-selector-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector-quota-pill,
+.model-selector-caret {
+  flex-shrink: 0;
+}
+
+@media (max-width: 1040px) {
+  .main-header-project {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  /* スマホでの上部ヘッダー整理 (1行50pxに収め、タイトル可視・折り返しゼロ・Safe Area対応) */
+  .main-header {
+    padding: calc(6px + env(safe-area-inset-top, 0px)) 10px 6px;
+    min-height: 48px;
+    height: auto;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
+  .sidebar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .chat-input-area {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .main-header-title {
+    flex: 1 1 auto;
+    min-width: 64px;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .main-header-actions {
+    gap: 6px;
+    flex-shrink: 0;
+    max-width: none;
+  }
+
+  .main-header-project {
+    display: none !important;
+  }
+
+  .header-desktop-only {
+    display: none !important;
+  }
+
+  .header-mobile-more-btn {
+    display: inline-flex;
+  }
+
+  .header-palette-kbd {
+    display: none;
+  }
+
+  .header-palette-mobile-icon {
+    display: inline-flex;
+  }
+
+  .token-quota-badge {
+    padding: 3px 8px;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .token-quota-time-label {
+    display: none; /* スマホではパーセントとバーのみ表示 */
+  }
+
+  /* クォータ詳細ポップオーバーを画面内に確実に収める */
+  .token-quota-popover {
+    position: fixed;
+    top: 52px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 75vh;
+    overflow-y: auto;
+  }
+
+  .token-quota-model-name {
+    max-width: 65vw;
+  }
+
+  /* サイドバーをスマホの大文字設定でも見やすく広げる */
+  .sidebar {
+    width: min(86vw, 320px) !important;
+  }
+
+  .sidebar-header {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .sidebar-brand {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-item-meta {
+    margin-top: 4px;
+    row-gap: 4px;
+    column-gap: 6px;
+  }
+
+  .sidebar-model-badge {
+    font-size: 10.5px;
+    padding: 1.5px 7px;
+  }
+
+  .header-model-badge {
+    display: none;
+  }
+
+  /* 入力欄・下部ボタン列のはみ出し防止 */
+  .chat-input-wrapper,
+  .chat-input-wrap {
+    background: linear-gradient(
+      180deg,
+      rgba(26, 30, 40, 0.85) 0%,
+      rgba(15, 17, 23, 0.96) 100%
+    );
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+    padding: 8px 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .chat-input-bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .chat-input-bottom-right {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .model-selector {
+    min-width: 0;
+    max-width: 62vw;
+  }
+
+  .model-selector-btn {
+    max-width: 100% !important;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .model-selector-base-full {
+    display: none;
+  }
+
+  .model-selector-base-short {
+    display: inline;
+  }
+
+  .model-selector-tier-pill {
+    font-size: 10px;
+  }
+
+  .model-tier-btn {
+    padding: 5px 10px;
+    font-size: 11.5px;
+  }
+
+  .model-selector-dropdown {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 60dvh !important;
+    overflow-y: auto;
+    z-index: 1100;
+  }
+
+  .chat-input,
+  .sidebar-rename-input,
+  .search-modal-input {
+    font-size: 16px; /* iOS/Androidの自動ズーム防止と視認性確保 */
+  }
+
+  .chat-send-btn {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--c-gemini-sparkle, #4da3ff);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(77, 163, 255, 0.35);
+  }
+}

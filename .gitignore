@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+dist-macos/
+dist-release/
+build/
+.vite/
+
+# Environment
+.env
+.env.local
+.env.production
+.env.*.local
+.dev.vars
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Cloudflare
+.wrangler/
+
+# Tooling output
+graphify-out/
+
+# Secrets
+.oauth-token
+.agent
+.gemini
