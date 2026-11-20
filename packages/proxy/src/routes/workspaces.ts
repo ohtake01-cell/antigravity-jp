@@ -4,6 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { Hono } from "hono";
 import { discovery, rpc, extractTargetAppDataDir } from "../routing.js";
@@ -14,6 +15,11 @@ import {
   invalidateProjectMapsCache,
   resolveGeminiBaseDir,
 } from "../metadata.js";
+import {
+  clearProjectAssignmentsForProject,
+  getProjectSettings,
+  updateProjectSettings,
+} from "../user-meta.js";
 
 export interface RegisteredProject {
   id: string;
@@ -32,10 +38,28 @@ function fileUriToLocalPath(uri: string): string {
   }
 }
 
+export function expandHomePath(rawPath: string): string {
+  const trimmed = rawPath.trim();
+  if (trimmed === "~") return homedir();
+  if (trimmed.startsWith("~/")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
+
+function sanitizeSubfolderName(name: string): string {
+  const cleaned = name
+    .trim()
+    .replace(/[\/\\:*?"<>|]/g, "_")
+    .replace(/^\.+/, "")
+    .trim();
+  return cleaned || "project";
+}
+
 function localPathToFileUri(rawPath: string): string {
   const trimmed = rawPath.trim();
   if (trimmed.startsWith("file://")) return trimmed.replace(/\/+$/, "");
-  const abs = resolve(trimmed);
+  const abs = resolve(expandHomePath(trimmed));
   const encoded = abs
     .split("/")
     .map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg)))
@@ -163,10 +187,45 @@ export function registerWorkspaceRoutes(app: Hono): void {
     }
   });
 
+  app.get("/api/projects/settings", async (c) => {
+    try {
+      const settings = await getProjectSettings();
+      return c.json({ settings });
+    } catch (err) {
+      return handleRPCError(c, err);
+    }
+  });
+
+  app.patch("/api/projects/settings", async (c) => {
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        defaultProjectFolder?: string;
+        createProjectSubfolder?: boolean;
+      };
+      const patch: {
+        defaultProjectFolder?: string;
+        createProjectSubfolder?: boolean;
+      } = {};
+      if (typeof body.defaultProjectFolder === "string") {
+        patch.defaultProjectFolder = body.defaultProjectFolder.trim();
+      }
+      if (typeof body.createProjectSubfolder === "boolean") {
+        patch.createProjectSubfolder = body.createProjectSubfolder;
+      }
+      const settings = await updateProjectSettings(patch);
+      return c.json({ ok: true, settings });
+    } catch (err) {
+      return handleRPCError(c, err);
+    }
+  });
+
   app.get("/api/projects", async (c) => {
     try {
-      const projects = await listRegisteredProjects();
-      return c.json({ projects });
+      const [projects, settings] = await Promise.all([
+        listRegisteredProjects(),
+        getProjectSettings(),
+      ]);
+      return c.json({ projects, settings });
     } catch (err) {
       return handleRPCError(c, err);
     }
@@ -178,15 +237,35 @@ export function registerWorkspaceRoutes(app: Hono): void {
         name?: string;
         folderPath?: string;
       };
-      const folderPath = typeof body.folderPath === "string" ? body.folderPath.trim() : "";
+      const rawFolderPath =
+        typeof body.folderPath === "string" ? body.folderPath.trim() : "";
       const rawName = typeof body.name === "string" ? body.name.trim() : "";
-      const name = rawName || (folderPath ? basename(folderPath.replace(/\/+$/, "")) : "");
+      const name =
+        rawName ||
+        (rawFolderPath ? basename(expandHomePath(rawFolderPath).replace(/\/+$/, "")) : "");
       if (!name) {
         return c.json({ error: "プロジェクト名またはフォルダパスを入力してください" }, 400);
       }
 
+      let effectiveFolderPath = rawFolderPath;
+      if (!effectiveFolderPath) {
+        const settings = await getProjectSettings();
+        if (settings.defaultProjectFolder) {
+          const baseFolder = resolve(expandHomePath(settings.defaultProjectFolder));
+          if (settings.createProjectSubfolder) {
+            const subPath = join(baseFolder, sanitizeSubfolderName(name));
+            await mkdir(subPath, { recursive: true });
+            effectiveFolderPath = subPath;
+          } else {
+            effectiveFolderPath = baseFolder;
+          }
+        }
+      }
+
       const id = randomUUID();
-      const folderUri = folderPath ? localPathToFileUri(folderPath) : undefined;
+      const folderUri = effectiveFolderPath
+        ? localPathToFileUri(effectiveFolderPath)
+        : undefined;
       const projectsDir = join(resolveGeminiBaseDir(), "config", "projects");
       await mkdir(projectsDir, { recursive: true });
       const payload = {
@@ -226,6 +305,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
       const targetPath = join(resolveGeminiBaseDir(), "config", "projects", `${id}.json`);
       await unlink(targetPath);
       invalidateProjectMapsCache();
+      await clearProjectAssignmentsForProject(id);
       return c.json({ ok: true, id });
     } catch {
       return c.json({ error: "プロジェクトが見つかりません" }, 404);

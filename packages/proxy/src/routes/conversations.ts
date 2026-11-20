@@ -53,6 +53,11 @@ import {
   saveManualTitleLock,
 } from "../title-formatter.js";
 import {
+  getUserMeta,
+  setPinnedOverride,
+  setProjectAssignment,
+} from "../user-meta.js";
+import {
   oversizedStepOffset,
   isRecoverableStepError,
   findNextValidOffset,
@@ -452,11 +457,12 @@ export function registerConversationRoutes(app: Hono): void {
   app.get("/api/conversations", async (c) => {
     try {
       const targetApp = extractTargetAppDataDir(c);
-      const [projectNameMap, wsToProjectMap, diskAnnotationsMap, instances] =
+      const [projectNameMap, wsToProjectMap, diskAnnotationsMap, userMeta, instances] =
         await Promise.all([
           getProjectNameMap(),
           getWorkspaceToProjectIdMap(),
           loadDiskAnnotationsMap(),
+          getUserMeta(),
           discovery.getInstances(false, targetApp),
         ]);
       const merged: Record<string, Record<string, unknown>> = {};
@@ -627,9 +633,18 @@ export function registerConversationRoutes(app: Hono): void {
                 excludedIds.add(id);
                 continue;
               }
+              const assignedProjectId = userMeta.projectAssignments[id];
+              const validAssignedProjectId =
+                assignedProjectId && projectNameMap.has(assignedProjectId)
+                  ? assignedProjectId
+                  : undefined;
               const effectiveProjectId =
+                validAssignedProjectId ||
                 projectId ||
                 (wsUri ? wsToProjectMap.get(wsUri.replace(/\/+$/, "")) : undefined);
+              if (validAssignedProjectId) {
+                (normalizedSummary as any).assignedProjectId = validAssignedProjectId;
+              }
               if (effectiveProjectId) {
                 const projectName = projectNameMap.get(effectiveProjectId);
                 if (projectName) {
@@ -637,7 +652,13 @@ export function registerConversationRoutes(app: Hono): void {
                 }
               }
 
-              if (diskAnnotation?.pinned !== undefined) {
+              const pinnedOverride = userMeta.pinnedOverrides[id];
+              if (typeof pinnedOverride === "boolean") {
+                normalizedSummary.annotations = {
+                  ...annotations,
+                  pinned: pinnedOverride,
+                };
+              } else if (diskAnnotation?.pinned !== undefined) {
                 normalizedSummary.annotations = {
                   ...annotations,
                   pinned: diskAnnotation.pinned,
@@ -781,12 +802,18 @@ export function registerConversationRoutes(app: Hono): void {
               injectedWorkspaces = [{ workspaceFolderAbsoluteUri: uri }];
             }
 
-            const resolvedDiskProjectId =
-              injectedWorkspaces[0]?.workspaceFolderAbsoluteUri
-                ? wsToProjectMap.get(
-                  injectedWorkspaces[0].workspaceFolderAbsoluteUri.replace(/\/+$/, ""),
-                )
+            const assignedDiskProjectId = userMeta.projectAssignments[diskId.id];
+            const validAssignedDiskProjectId =
+              assignedDiskProjectId && projectNameMap.has(assignedDiskProjectId)
+                ? assignedDiskProjectId
                 : undefined;
+            const resolvedDiskProjectId =
+              validAssignedDiskProjectId ||
+              (injectedWorkspaces[0]?.workspaceFolderAbsoluteUri
+                ? wsToProjectMap.get(
+                    injectedWorkspaces[0].workspaceFolderAbsoluteUri.replace(/\/+$/, ""),
+                  )
+                : undefined);
             const resolvedDiskProjectName = resolvedDiskProjectId
               ? projectNameMap.get(resolvedDiskProjectId)
               : undefined;
@@ -797,6 +824,11 @@ export function registerConversationRoutes(app: Hono): void {
               diskTitle,
               undefined,
             );
+            const diskPinnedOverride = userMeta.pinnedOverrides[diskId.id];
+            const effectiveDiskPinned =
+              typeof diskPinnedOverride === "boolean"
+                ? diskPinnedOverride
+                : diskAnnotation?.pinned;
 
             return {
               id: diskId.id,
@@ -809,9 +841,12 @@ export function registerConversationRoutes(app: Hono): void {
                 createdTime: diskId.mtime,
                 trajectoryId: "",
                 workspaces: injectedWorkspaces,
+                ...(validAssignedDiskProjectId
+                  ? { assignedProjectId: validAssignedDiskProjectId }
+                  : {}),
                 ...(resolvedDiskProjectName ? { projectName: resolvedDiskProjectName } : {}),
-                ...(diskAnnotation?.pinned !== undefined
-                  ? { annotations: { pinned: diskAnnotation.pinned } }
+                ...(effectiveDiskPinned !== undefined
+                  ? { annotations: { pinned: effectiveDiskPinned } }
                   : {}),
                 _diskOnly: true,
               },
@@ -1962,10 +1997,36 @@ export function registerConversationRoutes(app: Hono): void {
       return c.json({ error: "No valid annotation fields provided" }, 400);
     }
 
+    const existingDiskMeta = await getConversationAnnotationsFromDisk(
+      id,
+      targetApp ? [targetApp] : undefined,
+    );
+
+    if (patch.pinned !== undefined) {
+      await setPinnedOverride(id, patch.pinned);
+    }
+
     try {
       const rpcAnnotations: Record<string, unknown> = { ...patch };
       if (patch.archived !== undefined) {
         rpcAnnotations.archivalStatusTimestamp = new Date().toISOString();
+      }
+      // proto3 の仕様上、mergeAnnotations:true で pinned:false を送るとデフォルト値として無視され
+      // LS メモリ上の pinned:true が残って復活してしまう。pinned:false 指定時は既存項目を引き継ぎ
+      // mergeAnnotations:false で明示的に置換して LS 側からも確実にクリアする。
+      let mergeAnnotations = true;
+      if (patch.pinned === false) {
+        mergeAnnotations = false;
+        delete rpcAnnotations.pinned;
+        if (rpcAnnotations.title === undefined && existingDiskMeta?.title) {
+          rpcAnnotations.title = existingDiskMeta.title;
+        }
+        if (
+          rpcAnnotations.archived === undefined &&
+          existingDiskMeta?.archived === true
+        ) {
+          rpcAnnotations.archived = true;
+        }
       }
       await rpcForConversation(
         "UpdateConversationAnnotations",
@@ -1973,7 +2034,7 @@ export function registerConversationRoutes(app: Hono): void {
         {
           cascadeId: id,
           annotations: rpcAnnotations,
-          mergeAnnotations: true,
+          mergeAnnotations,
         },
         undefined,
         false,
@@ -1995,15 +2056,42 @@ export function registerConversationRoutes(app: Hono): void {
       await saveManualTitleLock(id, patch.title);
     }
     if (patch.archived !== undefined) {
-      const existingMeta = await getConversationAnnotationsFromDisk(id);
       await syncIntentionalArchiveRegistry(
         id,
         patch.archived,
-        patch.title ?? existingMeta?.title,
+        patch.title ?? existingDiskMeta?.title,
       );
     }
     conversationSignals.emit("activate", id);
     return c.json({ ok: true, id, ...patch });
+  });
+
+  app.patch("/api/conversations/:id/project", async (c) => {
+    const id = c.req.param("id");
+    let body: { projectId?: string | null };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const rawProjectId =
+      typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!rawProjectId) {
+      await setProjectAssignment(id, null);
+      conversationSignals.emit("activate", id);
+      return c.json({ ok: true, id, projectId: null, projectName: null });
+    }
+
+    const projectNameMap = await getProjectNameMap();
+    const projectName = projectNameMap.get(rawProjectId);
+    if (!projectName) {
+      return c.json({ error: "指定されたプロジェクトが見つかりません" }, 404);
+    }
+
+    await setProjectAssignment(id, rawProjectId);
+    conversationSignals.emit("activate", id);
+    return c.json({ ok: true, id, projectId: rawProjectId, projectName });
   });
 
   app.get("/api/conversations/:id/agents", async (c) => {

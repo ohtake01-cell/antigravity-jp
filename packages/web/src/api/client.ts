@@ -132,7 +132,26 @@ export const api = {
     }>("/api/workspaces"),
 
   projects: () =>
-    request<{ projects: import("../types").ProjectEntry[] }>("/api/projects"),
+    request<{
+      projects: import("../types").ProjectEntry[];
+      settings?: import("../types").ProjectSettings;
+    }>("/api/projects"),
+
+  projectSettings: () =>
+    request<{ settings: import("../types").ProjectSettings }>(
+      "/api/projects/settings",
+    ),
+
+  updateProjectSettings: (
+    patch: Partial<import("../types").ProjectSettings>,
+  ) =>
+    request<{ ok: boolean; settings: import("../types").ProjectSettings }>(
+      "/api/projects/settings",
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    ),
 
   createProject: (payload: { name?: string; folderPath?: string }) =>
     request<{ project: import("../types").ProjectEntry }>("/api/projects", {
@@ -145,6 +164,17 @@ export const api = {
       `/api/projects/${encodeURIComponent(id)}`,
       { method: "DELETE" },
     ),
+
+  assignConversationProject: (cascadeId: string, projectId: string | null) =>
+    request<{
+      ok: boolean;
+      id: string;
+      projectId: string | null;
+      projectName: string | null;
+    }>(`/api/conversations/${encodeURIComponent(cascadeId)}/project`, {
+      method: "PATCH",
+      body: JSON.stringify({ projectId }),
+    }),
 
   startConversation: (
     workspaceUri?: string,

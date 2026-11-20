@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/workflows/ci.yml"
+      - "deploy/windows/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "packages/proxy/src/**"
+      - "packages/proxy/package.json"
+      - "packages/proxy/tsconfig.json"
+      - "packages/proxy/vitest.config.ts"
+      - "packages/web/src/**"
+      - "packages/web/public/**"
+      - "packages/web/index.html"
+      - "packages/web/package.json"
+      - "packages/web/e2e/**"
+      - "packages/web/tsconfig*.json"
+      - "packages/web/vite-access-gate*.ts"
+      - "packages/web/vite.config.ts"
+      - "packages/web/vitest.config.ts"
+      - "packages/web/vitest.e2e.config.ts"
+  pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "deploy/windows/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "packages/proxy/src/**"
+      - "packages/proxy/package.json"
+      - "packages/proxy/tsconfig.json"
+      - "packages/proxy/vitest.config.ts"
+      - "packages/web/src/**"
+      - "packages/web/public/**"
+      - "packages/web/index.html"
+      - "packages/web/package.json"
+      - "packages/web/e2e/**"
+      - "packages/web/tsconfig*.json"
+      - "packages/web/vite-access-gate*.ts"
+      - "packages/web/vite.config.ts"
+      - "packages/web/vitest.config.ts"
+      - "packages/web/vitest.e2e.config.ts"
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Validate Windows PowerShell scripts
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $failed = $false
+          Get-ChildItem deploy/windows -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref] $tokens,
+              [ref] $parseErrors
+            ) | Out-Null
+
+            if ($parseErrors.Count -gt 0) {
+              $failed = $true
+              Write-Error "$($_.Name): $($parseErrors.Message -join '; ')"
+            }
+          }
+
+          if ($failed) {
+            exit 1
+          }
+
+          & ./deploy/windows/watchdog-common.tests.ps1
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run E2E
+        run: pnpm test:e2e

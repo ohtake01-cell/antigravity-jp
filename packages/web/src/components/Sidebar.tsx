@@ -252,12 +252,17 @@ export function formatCompactModelBadge(
   return { text: fullLabel, provider, fullLabel };
 }
 
-/** Desktop-equivalent context menu (Rename / Pin / Branch / Archive / Delete) */
+/** Desktop-equivalent context menu (Rename / Pin / Move to Project / Branch / Archive / Delete) */
 function ContextMenu({
   title,
   isPinned,
+  projects,
+  currentProjectId,
+  hasManualProject,
   onRename,
   onTogglePin,
+  onAssignProject,
+  onOpenAddProject,
   onBranchSideChat,
   onArchive,
   onDelete,
@@ -265,14 +270,20 @@ function ContextMenu({
 }: {
   title: string;
   isPinned: boolean;
+  projects?: ProjectEntry[];
+  currentProjectId?: string;
+  hasManualProject?: boolean;
   onRename: () => void;
   onTogglePin: () => void;
+  onAssignProject?: (projectId: string | null) => void;
+  onOpenAddProject?: () => void;
   onBranchSideChat?: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent | TouchEvent) => {
@@ -287,6 +298,8 @@ function ContextMenu({
       document.removeEventListener("touchstart", handler);
     };
   }, [onClose]);
+
+  const projectList = projects ?? [];
 
   return (
     <div
@@ -320,6 +333,85 @@ function ContextMenu({
       >
         <span>{isPinned ? "📌 ピン留めを解除" : "📌 ピン留め"}</span>
       </button>
+      {onAssignProject && (
+        <div className="context-menu-project-section">
+          <button
+            type="button"
+            className={`context-menu-item ${projectPickerOpen ? "expanded" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setProjectPickerOpen((v) => !v);
+            }}
+          >
+            <span>📁 プロジェクトに追加・移動</span>
+            <span className="context-menu-caret">
+              {projectPickerOpen ? "▴" : "▾"}
+            </span>
+          </button>
+          {projectPickerOpen && (
+            <div
+              className="context-menu-project-list"
+              role="group"
+              aria-label="移動先プロジェクトを選択"
+            >
+              {projectList.length === 0 ? (
+                <div className="context-menu-project-empty">
+                  プロジェクトがまだありません
+                </div>
+              ) : (
+                projectList.map((proj) => {
+                  const isCurrent = proj.id === currentProjectId;
+                  return (
+                    <button
+                      key={proj.id}
+                      type="button"
+                      className={`context-menu-project-item ${isCurrent ? "active" : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAssignProject(proj.id);
+                        onClose();
+                      }}
+                    >
+                      <span className="context-menu-project-name">
+                        {proj.name}
+                      </span>
+                      {isCurrent && (
+                        <span className="context-menu-project-check">✓</span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+              {hasManualProject && (
+                <button
+                  type="button"
+                  className="context-menu-project-item remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAssignProject(null);
+                    onClose();
+                  }}
+                >
+                  <span>↩ プロジェクトから外す</span>
+                </button>
+              )}
+              {onOpenAddProject && (
+                <button
+                  type="button"
+                  className="context-menu-project-item add-new"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenAddProject();
+                    onClose();
+                  }}
+                >
+                  <span>＋ 新しいプロジェクトを作成</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {onBranchSideChat && (
         <button
           type="button"
@@ -403,6 +495,9 @@ export function Sidebar({
   const [localPinnedOverrides, setLocalPinnedOverrides] = useState<
     Record<string, boolean>
   >({});
+  const [localProjectOverrides, setLocalProjectOverrides] = useState<
+    Record<string, string | null>
+  >({});
   const [localArchivedIds, setLocalArchivedIds] = useState<
     Record<string, boolean>
   >({});
@@ -412,6 +507,7 @@ export function Sidebar({
   >("all");
   const [subagentOnlyFilter, setSubagentOnlyFilter] = useState(false);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
+  const [defaultProjectFolder, setDefaultProjectFolder] = useState("");
   const [hideEmptyProjects, setHideEmptyProjects] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
@@ -419,6 +515,11 @@ export function Sidebar({
   const [newProjectFolder, setNewProjectFolder] = useState("");
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const projectLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const projectLongPressTriggeredRef = useRef(false);
+  const projectTouchStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const loadProjects = useCallback(async () => {
     try {
@@ -426,6 +527,9 @@ export function Sidebar({
       const res = await api.projects();
       if (Array.isArray(res?.projects)) {
         setProjects(res.projects);
+      }
+      if (res?.settings && typeof res.settings.defaultProjectFolder === "string") {
+        setDefaultProjectFolder(res.settings.defaultProjectFolder);
       }
     } catch {
       // Non-fatal if /api/projects is unavailable
@@ -437,15 +541,31 @@ export function Sidebar({
   }, [loadProjects, connected]);
 
   useEffect(() => {
+    const onSettingsChanged = () => {
+      void loadProjects();
+    };
+    window.addEventListener("antigravity-jp:project-settings-changed", onSettingsChanged);
+    return () =>
+      window.removeEventListener(
+        "antigravity-jp:project-settings-changed",
+        onSettingsChanged,
+      );
+  }, [loadProjects]);
+
+  useEffect(() => {
     if (!projectMenuId) return;
-    const onOutside = (e: MouseEvent) => {
+    const onOutside = (e: MouseEvent | TouchEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target?.closest?.(".sidebar-project-menu-wrap")) {
         setProjectMenuId(null);
       }
     };
     document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
+    document.addEventListener("touchstart", onOutside);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("touchstart", onOutside);
+    };
   }, [projectMenuId]);
 
   const handleCreateProject = useCallback(
@@ -481,21 +601,97 @@ export function Sidebar({
 
   const handleDeleteProject = useCallback(
     async (proj: ProjectEntry) => {
+      const confirmed =
+        typeof window === "undefined" ||
+        typeof window.confirm !== "function" ||
+        window.confirm(
+          `プロジェクト「${proj.name}」を一覧から除去しますか？\n※中のチャットやフォルダ自体は削除されません。`,
+        );
+      if (!confirmed) {
+        setProjectMenuId(null);
+        return;
+      }
       try {
         await api.deleteProject(proj.id);
         setProjects((prev) => prev.filter((p) => p.id !== proj.id));
+        setLocalProjectOverrides((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const [convId, pid] of Object.entries(next)) {
+            if (pid === proj.id) {
+              delete next[convId];
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+        onRefresh?.();
       } catch (err) {
         console.error("Failed to delete project:", err);
       } finally {
         setProjectMenuId(null);
       }
     },
-    [],
+    [onRefresh],
+  );
+
+  useEffect(() => {
+    setLocalProjectOverrides((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      let changed = false;
+      const next = { ...prev };
+      for (const id of keys) {
+        const conv = conversations.find((c) => c.id === id);
+        if (!conv) continue;
+        const serverAssigned = conv.summary.assignedProjectId ?? null;
+        if (serverAssigned === prev[id]) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [conversations]);
+
+  const handleAssignProject = useCallback(
+    async (conv: ConversationEntry, projectId: string | null) => {
+      setLocalProjectOverrides((prev) => ({ ...prev, [conv.id]: projectId }));
+      if (projectId) {
+        setCollapsed((prev) =>
+          prev[`proj:${projectId}`] ? { ...prev, [`proj:${projectId}`]: false } : prev,
+        );
+      }
+      try {
+        await api.assignConversationProject(conv.id, projectId);
+        onRefresh?.();
+      } catch (err) {
+        console.error("Failed to assign project:", err);
+        setLocalProjectOverrides((prev) => {
+          const next = { ...prev };
+          delete next[conv.id];
+          return next;
+        });
+      }
+    },
+    [onRefresh],
   );
 
   const matchConversationProject = useCallback(
     (conv: ConversationEntry): ProjectEntry | undefined => {
       if (projects.length === 0) return undefined;
+      if (Object.prototype.hasOwnProperty.call(localProjectOverrides, conv.id)) {
+        const overrideId = localProjectOverrides[conv.id];
+        if (overrideId) {
+          const byOverride = projects.find((p) => p.id === overrideId);
+          if (byOverride) return byOverride;
+        }
+      } else if (conv.summary.assignedProjectId) {
+        const byAssigned = projects.find(
+          (p) => p.id === conv.summary.assignedProjectId,
+        );
+        if (byAssigned) return byAssigned;
+      }
       const metaProjId = (conv.summary.trajectoryMetadata as { projectId?: string } | undefined)?.projectId;
       if (metaProjId) {
         const byId = projects.find((p) => p.id === metaProjId);
@@ -514,7 +710,7 @@ export function Sidebar({
       const wsName = extractWorkspaceName(conv);
       return projects.find((p) => p.name === wsName);
     },
-    [projects],
+    [projects, localProjectOverrides],
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<
@@ -996,6 +1192,14 @@ export function Sidebar({
     const displayTitle =
       (localTitleOverrides[conv.id] ?? conv.summary.summary)?.trim() ||
       "新しいチャット";
+    const matchedProject = matchConversationProject(conv);
+    const hasManualProject = Object.prototype.hasOwnProperty.call(
+      localProjectOverrides,
+      conv.id,
+    )
+      ? Boolean(localProjectOverrides[conv.id])
+      : Boolean(conv.summary.assignedProjectId);
+    const displayProjectName = matchedProject?.name ?? conv.summary.projectName;
     const isPinned =
       localPinnedOverrides[conv.id] ??
       conv.summary.annotations?.pinned === true;
@@ -1192,10 +1396,10 @@ export function Sidebar({
                           {relativeTime(conv.summary.lastModifiedTime)}
                           {" · "}
                           {conv.summary.stepCount ?? 0} ステップ
-                          {conv.summary.projectName && (
+                          {displayProjectName && (
                             <span className="sidebar-meta-project">
                               {" · "}
-                              {conv.summary.projectName}
+                              {displayProjectName}
                             </span>
                           )}
                         </span>
@@ -1280,8 +1484,18 @@ export function Sidebar({
               <ContextMenu
                 title={displayTitle}
                 isPinned={isPinned}
+                projects={projects}
+                currentProjectId={matchedProject?.id}
+                hasManualProject={hasManualProject}
                 onRename={() => handleStartRename(conv)}
                 onTogglePin={() => void handleTogglePin(conv)}
+                onAssignProject={(projectId) =>
+                  void handleAssignProject(conv, projectId)
+                }
+                onOpenAddProject={() => {
+                  setAddProjectOpen(true);
+                  setProjectError(null);
+                }}
                 onBranchSideChat={
                   onBranchSideChat ? () => onBranchSideChat(conv) : undefined
                 }
@@ -1572,11 +1786,11 @@ export function Sidebar({
                 );
               })}
 
-            {(projects.length > 0 || addProjectOpen) && (
-              <div className="sidebar-projects-bar" data-testid="sidebar-projects">
-                <div className="sidebar-projects-header">
-                  <span className="sidebar-projects-title">プロジェクト</span>
-                  <div className="sidebar-projects-header-actions">
+            <div className="sidebar-projects-bar" data-testid="sidebar-projects">
+              <div className="sidebar-projects-header">
+                <span className="sidebar-projects-title">プロジェクト</span>
+                <div className="sidebar-projects-header-actions">
+                  {projects.length > 0 && (
                     <button
                       type="button"
                       className={`sidebar-projects-icon-btn ${hideEmptyProjects ? "active" : ""}`}
@@ -1590,68 +1804,72 @@ export function Sidebar({
                     >
                       <IconFilter size={13} />
                     </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`sidebar-projects-icon-btn ${addProjectOpen ? "active" : ""}`}
+                    title="プロジェクトを追加"
+                    aria-label="プロジェクトを追加"
+                    onClick={() => {
+                      setAddProjectOpen((v) => !v);
+                      setProjectError(null);
+                    }}
+                  >
+                    <IconFolderPlus size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {addProjectOpen && (
+                <form
+                  className="sidebar-project-add-form"
+                  onSubmit={(e) => void handleCreateProject(e)}
+                >
+                  <input
+                    type="text"
+                    className="sidebar-project-input"
+                    placeholder="プロジェクト名（例: アプリ開発・旅行メモ）"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    disabled={projectSaving}
+                  />
+                  <input
+                    type="text"
+                    className="sidebar-project-input"
+                    placeholder={
+                      defaultProjectFolder
+                        ? `フォルダパス（空欄で ${defaultProjectFolder}）`
+                        : "フォルダパス（空欄でも作成可・例: ~/Projects）"
+                    }
+                    value={newProjectFolder}
+                    onChange={(e) => setNewProjectFolder(e.target.value)}
+                    disabled={projectSaving}
+                  />
+                  {projectError && (
+                    <div className="sidebar-project-error">{projectError}</div>
+                  )}
+                  <div className="sidebar-project-form-btns">
+                    <button
+                      type="submit"
+                      className="sidebar-project-submit-btn"
+                      disabled={projectSaving}
+                    >
+                      {projectSaving ? "追加中…" : "追加"}
+                    </button>
                     <button
                       type="button"
-                      className={`sidebar-projects-icon-btn ${addProjectOpen ? "active" : ""}`}
-                      title="プロジェクトを追加"
-                      aria-label="プロジェクトを追加"
+                      className="sidebar-project-cancel-btn"
                       onClick={() => {
-                        setAddProjectOpen((v) => !v);
+                        setAddProjectOpen(false);
                         setProjectError(null);
                       }}
                     >
-                      <IconFolderPlus size={14} />
+                      キャンセル
                     </button>
                   </div>
-                </div>
-
-                {addProjectOpen && (
-                  <form
-                    className="sidebar-project-add-form"
-                    onSubmit={(e) => void handleCreateProject(e)}
-                  >
-                    <input
-                      type="text"
-                      className="sidebar-project-input"
-                      placeholder="フォルダパス（例: ~/Projects）"
-                      value={newProjectFolder}
-                      onChange={(e) => setNewProjectFolder(e.target.value)}
-                      disabled={projectSaving}
-                    />
-                    <input
-                      type="text"
-                      className="sidebar-project-input"
-                      placeholder="プロジェクト名（省略時はフォルダ名）"
-                      value={newProjectName}
-                      onChange={(e) => setNewProjectName(e.target.value)}
-                      disabled={projectSaving}
-                    />
-                    {projectError && (
-                      <div className="sidebar-project-error">{projectError}</div>
-                    )}
-                    <div className="sidebar-project-form-btns">
-                      <button
-                        type="submit"
-                        className="sidebar-project-submit-btn"
-                        disabled={projectSaving}
-                      >
-                        {projectSaving ? "追加中…" : "追加"}
-                      </button>
-                      <button
-                        type="button"
-                        className="sidebar-project-cancel-btn"
-                        onClick={() => {
-                          setAddProjectOpen(false);
-                          setProjectError(null);
-                        }}
-                      >
-                        キャンセル
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
+                </form>
+              )}
+            </div>
 
             {groups
               .filter((g) => !g.isRunningSection && !g.isPinnedSection)
@@ -1673,8 +1891,70 @@ export function Sidebar({
                   >
                     {proj ? (
                       <div
-                        className={`workspace-group-header project-group-header ${isGroupCollapsed ? "is-collapsed" : ""}`}
-                        onClick={() => toggleGroup(groupKey)}
+                        className={`workspace-group-header project-group-header ${isGroupCollapsed ? "is-collapsed" : ""} ${projectMenuId === proj.id ? "menu-open" : ""}`}
+                        onTouchStart={(e) => {
+                          const touch = e.touches[0];
+                          if (!touch) return;
+                          projectTouchStartRef.current = {
+                            x: touch.clientX,
+                            y: touch.clientY,
+                          };
+                          projectLongPressTriggeredRef.current = false;
+                          if (projectLongPressTimerRef.current) {
+                            clearTimeout(projectLongPressTimerRef.current);
+                          }
+                          projectLongPressTimerRef.current = setTimeout(() => {
+                            projectLongPressTriggeredRef.current = true;
+                            if (
+                              typeof navigator !== "undefined" &&
+                              navigator.vibrate
+                            ) {
+                              navigator.vibrate(20);
+                            }
+                            setProjectMenuId(proj.id);
+                          }, 450);
+                        }}
+                        onTouchMove={(e) => {
+                          if (!projectLongPressTimerRef.current) return;
+                          const touch = e.touches[0];
+                          if (!touch) return;
+                          const dx = Math.abs(
+                            touch.clientX - projectTouchStartRef.current.x,
+                          );
+                          const dy = Math.abs(
+                            touch.clientY - projectTouchStartRef.current.y,
+                          );
+                          if (dx > 10 || dy > 10) {
+                            clearTimeout(projectLongPressTimerRef.current);
+                            projectLongPressTimerRef.current = null;
+                          }
+                        }}
+                        onTouchEnd={() => {
+                          if (projectLongPressTimerRef.current) {
+                            clearTimeout(projectLongPressTimerRef.current);
+                            projectLongPressTimerRef.current = null;
+                          }
+                        }}
+                        onTouchCancel={() => {
+                          if (projectLongPressTimerRef.current) {
+                            clearTimeout(projectLongPressTimerRef.current);
+                            projectLongPressTimerRef.current = null;
+                          }
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setProjectMenuId(proj.id);
+                        }}
+                        onClick={(e) => {
+                          if (projectLongPressTriggeredRef.current) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            projectLongPressTriggeredRef.current = false;
+                            return;
+                          }
+                          toggleGroup(groupKey);
+                        }}
                         title={
                           proj.folderPath
                             ? `${proj.name} (${proj.folderPath})`
@@ -1701,6 +1981,7 @@ export function Sidebar({
                         <div
                           className="sidebar-project-row-actions"
                           onClick={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
                         >
                           <div className="sidebar-project-menu-wrap">
                             <button
@@ -1714,7 +1995,7 @@ export function Sidebar({
                                 )
                               }
                             >
-                              <IconMore size={13} />
+                              <IconMore size={14} />
                             </button>
                             {projectMenuId === proj.id && (
                               <div
@@ -1731,7 +2012,7 @@ export function Sidebar({
                                     else onNew();
                                   }}
                                 >
-                                  新規チャットを作成
+                                  ＋ 新規チャットを作成
                                 </button>
                                 {proj.folderPath && (
                                   <button
@@ -1745,7 +2026,7 @@ export function Sidebar({
                                       setProjectMenuId(null);
                                     }}
                                   >
-                                    パスをコピー
+                                    📋 パスをコピー
                                   </button>
                                 )}
                                 {!proj.isDefaultCli && (
@@ -1755,7 +2036,7 @@ export function Sidebar({
                                     className="sidebar-project-dropdown-item danger"
                                     onClick={() => void handleDeleteProject(proj)}
                                   >
-                                    プロジェクトを削除
+                                    🗑️ プロジェクトを除去
                                   </button>
                                 )}
                               </div>
@@ -1771,7 +2052,7 @@ export function Sidebar({
                               else onNew();
                             }}
                           >
-                            <IconPlus size={13} />
+                            <IconPlus size={14} />
                           </button>
                         </div>
                       </div>

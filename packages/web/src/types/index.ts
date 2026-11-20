@@ -28,6 +28,7 @@ export interface ConversationSummary {
   lastUserInputTime?: string;
   lastUserInputStepIndex?: number;
   projectName?: string;
+  assignedProjectId?: string;
   model?: string;
   modelLabel?: string;
   modelProvider?: "google" | "anthropic" | "openai" | "ollama";
@@ -413,6 +414,11 @@ export interface ProjectEntry {
   folderUri?: string;
   folderPath?: string;
   isDefaultCli?: boolean;
+}
+
+export interface ProjectSettings {
+  defaultProjectFolder: string;
+  createProjectSubfolder: boolean;
 }
 
 export type AppTier = "lite" | "pro";

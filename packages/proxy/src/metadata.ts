@@ -406,7 +406,22 @@ export async function setConversationAnnotationsOnDisk(
   appDataDirs: readonly string[] = KNOWN_APP_DATA_DIRS,
 ): Promise<boolean> {
   const geminiBase = resolveGeminiBaseDir();
+  // 既に .pbtxt が存在する appDataDir を優先し、別のディレクトリに二重作成されるのを防ぐ
+  const existingDirs: string[] = [];
+  const otherDirs: string[] = [];
   for (const appDataDir of appDataDirs) {
+    const pbtxtPath = join(geminiBase, appDataDir, "annotations", `${id}.pbtxt`);
+    try {
+      await stat(pbtxtPath);
+      existingDirs.push(appDataDir);
+    } catch {
+      otherDirs.push(appDataDir);
+    }
+  }
+  const orderedDirs = existingDirs.length > 0 ? existingDirs : otherDirs;
+  let updatedAny = false;
+
+  for (const appDataDir of orderedDirs) {
     const dir = join(geminiBase, appDataDir, "annotations");
     const pbtxtPath = join(dir, `${id}.pbtxt`);
     try {
@@ -457,12 +472,16 @@ export async function setConversationAnnotationsOnDisk(
       }
 
       await writeFile(pbtxtPath, content, "utf-8");
-      return true;
+      updatedAny = true;
+      // 既存ファイルが無い新規作成時は先頭ディレクトリのみに作成して終了
+      if (existingDirs.length === 0) {
+        return true;
+      }
     } catch {
       // Try next directory
     }
   }
-  return false;
+  return updatedAny;
 }
 
 export async function setConversationTitleOnDisk(

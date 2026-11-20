@@ -91,6 +91,11 @@ export function SettingsPanel({
   const [archiveQuery, setArchiveQuery] = useState("");
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
+  // Project default folder settings
+  const [defaultProjectFolder, setDefaultProjectFolder] = useState("");
+  const [createProjectSubfolder, setCreateProjectSubfolder] = useState(false);
+  const [projectSettingsSaving, setProjectSettingsSaving] = useState(false);
+
   // Unified Pro-tier provider account & login state
   const isProTier = (settings.appTier ?? "lite") === "pro";
   const [providers, setProviders] = useState<ProviderAccountInfo[]>([]);
@@ -190,6 +195,25 @@ export function SettingsPanel({
   }, [fetchArchived, settings.targetApp]);
 
   useEffect(() => {
+    let active = true;
+    const loadProjectSettings = async () => {
+      try {
+        if (typeof api.projectSettings !== "function") return;
+        const res = await api.projectSettings();
+        if (!active || !res?.settings) return;
+        setDefaultProjectFolder(res.settings.defaultProjectFolder ?? "");
+        setCreateProjectSubfolder(Boolean(res.settings.createProjectSubfolder));
+      } catch {
+        // Non-fatal if endpoint unavailable
+      }
+    };
+    void loadProjectSettings();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const syncPermission = () => {
       setNotificationPermission(getBrowserNotificationPermission());
     };
@@ -213,6 +237,32 @@ export function SettingsPanel({
     const timer = setTimeout(() => setSavedFlash(false), 1600);
     return () => clearTimeout(timer);
   }, []);
+
+  const handleSaveProjectSettings = useCallback(
+    async (nextFolder: string, nextSubfolder: boolean) => {
+      if (projectSettingsSaving || typeof api.updateProjectSettings !== "function") {
+        return;
+      }
+      setProjectSettingsSaving(true);
+      try {
+        const res = await api.updateProjectSettings({
+          defaultProjectFolder: nextFolder.trim(),
+          createProjectSubfolder: nextSubfolder,
+        });
+        if (res?.settings) {
+          setDefaultProjectFolder(res.settings.defaultProjectFolder);
+          setCreateProjectSubfolder(res.settings.createProjectSubfolder);
+        }
+        window.dispatchEvent(new CustomEvent("antigravity-jp:project-settings-changed"));
+        flashSaved("プロジェクト設定を保存しました");
+      } catch {
+        flashSaved("保存に失敗しました");
+      } finally {
+        setProjectSettingsSaving(false);
+      }
+    },
+    [projectSettingsSaving, flashSaved],
+  );
 
   const handleModelChange = useCallback(
     (modelId: string) => {
@@ -742,6 +792,80 @@ export function SettingsPanel({
               <option value="conversational">高速（即実行）</option>
               <option value="planning">計画（プラン作成）</option>
             </select>
+          </div>
+        </div>
+
+        {/* ── プロジェクト設定 ── */}
+        <div className="settings-section" data-testid="settings-project-section">
+          <h2 className="settings-section-title">📁 プロジェクト</h2>
+          <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px" }}>
+            <div className="settings-row-info">
+              <span className="settings-row-label">新規プロジェクトのデフォルトフォルダ</span>
+              <span className="settings-row-desc">
+                サイドバーでフォルダパスを空欄のままプロジェクトを作成したときに自動適用されます（空欄のままならフォルダ紐づけなし）。<code>~/</code> 省略記法にも対応しています。
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                type="text"
+                className="settings-archive-search"
+                style={{ flex: "1 1 220px", margin: 0 }}
+                placeholder="例: ~/Projects または外付けディスクのパス（空欄でフォルダなし）"
+                aria-label="新規プロジェクトのデフォルトフォルダ"
+                value={defaultProjectFolder}
+                onChange={(e) => setDefaultProjectFolder(e.target.value)}
+                disabled={projectSettingsSaving}
+              />
+              <button
+                type="button"
+                className="settings-archive-btn primary"
+                disabled={projectSettingsSaving}
+                onClick={() =>
+                  void handleSaveProjectSettings(
+                    defaultProjectFolder,
+                    createProjectSubfolder,
+                  )
+                }
+              >
+                {projectSettingsSaving ? "保存中…" : "保存"}
+              </button>
+              {defaultProjectFolder && (
+                <button
+                  type="button"
+                  className="settings-archive-btn"
+                  disabled={projectSettingsSaving}
+                  onClick={() =>
+                    void handleSaveProjectSettings("", createProjectSubfolder)
+                  }
+                >
+                  クリア
+                </button>
+              )}
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "12.5px",
+                color: "var(--text-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={createProjectSubfolder}
+                disabled={projectSettingsSaving}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setCreateProjectSubfolder(checked);
+                  void handleSaveProjectSettings(defaultProjectFolder, checked);
+                }}
+              />
+              <span>
+                空欄で作成時、デフォルトフォルダの中に「プロジェクト名」フォルダを自動作成する
+              </span>
+            </label>
           </div>
         </div>
 

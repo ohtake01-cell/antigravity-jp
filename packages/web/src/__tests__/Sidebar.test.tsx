@@ -9,7 +9,8 @@ vi.mock("../api/client", () => ({
     search: vi.fn(),
     projects: vi.fn().mockResolvedValue({ projects: [] }),
     createProject: vi.fn(),
-    deleteProject: vi.fn(),
+    deleteProject: vi.fn().mockResolvedValue({ ok: true }),
+    assignConversationProject: vi.fn().mockResolvedValue({ ok: true }),
   },
 }));
 
@@ -643,5 +644,67 @@ describe("Sidebar", () => {
     expect(onBranchSideChat).toHaveBeenCalledWith(
       expect.objectContaining({ id: "conv-agent-tree" }),
     );
+  });
+
+  it("allows assigning a chat to a project from context menu and removing a project from project menu", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.projects).mockResolvedValueOnce({
+      projects: [
+        { id: "proj-alpha", name: "開発ノート", folderPath: "/tmp/notes" },
+      ],
+      settings: { defaultProjectFolder: "/tmp/default", createProjectSubfolder: false },
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const conversations: ConversationEntry[] = [
+      {
+        id: "conv-move",
+        summary: {
+          summary: "移動したいチャット",
+          stepCount: 3,
+          status: "CASCADE_RUN_STATUS_IDLE",
+          lastModifiedTime: "2026-11-21T03:00:00.000Z",
+          createdTime: "2026-11-21T02:00:00.000Z",
+          trajectoryId: "t-move",
+          workspaces: [],
+        },
+      },
+    ];
+
+    render(
+      <Sidebar
+        conversations={conversations}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRefresh={vi.fn()}
+        onSettings={vi.fn()}
+        loading={false}
+        connected={true}
+        isOpen={true}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("開発ノート")).toBeInTheDocument();
+
+    // Open chat menu -> プロジェクトに追加・移動 -> select 開発ノート
+    fireEvent.click(screen.getByTitle("メニュー"));
+    fireEvent.click(screen.getByText("📁 プロジェクトに追加・移動"));
+    const moveTargets = screen.getAllByRole("button", { name: /開発ノート/ });
+    fireEvent.click(moveTargets[moveTargets.length - 1]);
+    expect(api.assignConversationProject).toHaveBeenCalledWith(
+      "conv-move",
+      "proj-alpha",
+    );
+
+    // Open project menu -> 🗑️ プロジェクトを除去
+    fireEvent.click(screen.getByLabelText("開発ノートのメニュー"));
+    fireEvent.click(screen.getByText("🗑️ プロジェクトを除去"));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(api.deleteProject).toHaveBeenCalledWith("proj-alpha");
+
+    confirmSpy.mockRestore();
   });
 });
