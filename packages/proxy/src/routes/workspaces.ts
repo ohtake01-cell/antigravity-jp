@@ -21,6 +21,29 @@ import {
   getProjectSettings,
   updateProjectSettings,
 } from "../user-meta.js";
+import { invalidateConversationsListCache } from "./conversations.js";
+
+const WORKSPACES_CACHE_TTL_MS = process.env.VITEST ? 0 : 3_000;
+
+interface CachedWorkspacesPayload {
+  fetchedAt: number;
+  data: {
+    homeDirPath: string;
+    homeDirUri: string;
+    workspaceInfos: { workspaceUri: string; gitRootUri?: string }[];
+  };
+}
+
+const workspacesCache = new Map<string, CachedWorkspacesPayload>();
+const workspacesInFlight = new Map<
+  string,
+  Promise<CachedWorkspacesPayload["data"]>
+>();
+
+function invalidateWorkspacesCache(): void {
+  workspacesCache.clear();
+  workspacesInFlight.clear();
+}
 
 export interface RegisteredProject {
   id: string;
@@ -116,6 +139,21 @@ export function registerWorkspaceRoutes(app: Hono): void {
   app.get("/api/workspaces", async (c) => {
     try {
       const targetApp = extractTargetAppDataDir(c);
+      const cacheKey = targetApp ?? "__all__";
+      const force = c.req.query("refresh") === "1";
+
+      if (!force && WORKSPACES_CACHE_TTL_MS > 0) {
+        const cached = workspacesCache.get(cacheKey);
+        if (cached && Date.now() - cached.fetchedAt < WORKSPACES_CACHE_TTL_MS) {
+          return c.json(cached.data);
+        }
+        const pending = workspacesInFlight.get(cacheKey);
+        if (pending) {
+          return c.json(await pending);
+        }
+      }
+
+      const run = (async (): Promise<CachedWorkspacesPayload["data"]> => {
       const instances = await discovery.getInstances(false, targetApp);
       const workspaceMap = new Map<
         string,
@@ -178,11 +216,28 @@ export function registerWorkspaceRoutes(app: Hono): void {
         }
       }
 
-      return c.json({
+      return {
         homeDirPath,
         homeDirUri,
         workspaceInfos: Array.from(workspaceMap.values()),
-      });
+      };
+      })();
+
+      if (WORKSPACES_CACHE_TTL_MS > 0) {
+        workspacesInFlight.set(cacheKey, run);
+      }
+
+      try {
+        const payload = await run;
+        if (WORKSPACES_CACHE_TTL_MS > 0) {
+          workspacesCache.set(cacheKey, { fetchedAt: Date.now(), data: payload });
+        }
+        return c.json(payload);
+      } finally {
+        if (workspacesInFlight.get(cacheKey) === run) {
+          workspacesInFlight.delete(cacheKey);
+        }
+      }
     } catch (err) {
       return handleRPCError(c, err);
     }
@@ -285,6 +340,8 @@ export function registerWorkspaceRoutes(app: Hono): void {
         "utf-8",
       );
       invalidateProjectMapsCache();
+      invalidateWorkspacesCache();
+      invalidateConversationsListCache();
 
       const project: RegisteredProject = {
         id,
@@ -414,6 +471,8 @@ export function registerWorkspaceRoutes(app: Hono): void {
       ) {
         await assignConversationsToProject(body.preserveConversationIds, id);
       }
+      invalidateWorkspacesCache();
+      invalidateConversationsListCache();
 
       const project: RegisteredProject = {
         id,
@@ -438,6 +497,8 @@ export function registerWorkspaceRoutes(app: Hono): void {
       await unlink(targetPath);
       invalidateProjectMapsCache();
       await clearProjectAssignmentsForProject(id);
+      invalidateWorkspacesCache();
+      invalidateConversationsListCache();
       return c.json({ ok: true, id });
     } catch {
       return c.json({ error: "プロジェクトが見つかりません" }, 404);

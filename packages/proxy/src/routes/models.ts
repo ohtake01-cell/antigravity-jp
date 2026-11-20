@@ -74,9 +74,16 @@ interface RawLSModelsPayload {
 }
 
 const CATALOG_TTL_MS = 30_000;
+const MODELS_TTL_MS = process.env.VITEST ? 0 : 10_000;
 let cachedCatalog: ModelCatalogResponse | null = null;
 let cachedCatalogAt = 0;
 let catalogInflight: Promise<ModelCatalogResponse> | null = null;
+
+const mergedModelsCache = new Map<
+  string,
+  { fetchedAt: number; payload: RawLSModelsPayload }
+>();
+const mergedModelsInflight = new Map<string, Promise<RawLSModelsPayload>>();
 
 export function inferModelFamily(
   id: string,
@@ -122,7 +129,21 @@ function formatOpenAISlugLabel(slug: string): string {
 
 export async function fetchMergedLSModels(
   targetApp?: string,
+  forceRefresh = false,
 ): Promise<RawLSModelsPayload> {
+  const cacheKey = targetApp ?? "__all__";
+  if (!forceRefresh && MODELS_TTL_MS > 0) {
+    const cached = mergedModelsCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < MODELS_TTL_MS) {
+      return cached.payload;
+    }
+    const inflight = mergedModelsInflight.get(cacheKey);
+    if (inflight) {
+      return await inflight;
+    }
+  }
+
+  const run = (async (): Promise<RawLSModelsPayload> => {
   const instances = await discovery.getInstances(false, targetApp);
   if (instances.length === 0) {
     return (await rpcAny(
@@ -183,6 +204,22 @@ export async function fetchMergedLSModels(
     ...basePayload,
     clientModelConfigs: [...mergedMap.values()],
   };
+  })();
+
+  if (MODELS_TTL_MS > 0) {
+    mergedModelsInflight.set(cacheKey, run);
+  }
+  try {
+    const result = await run;
+    if (MODELS_TTL_MS > 0) {
+      mergedModelsCache.set(cacheKey, { fetchedAt: Date.now(), payload: result });
+    }
+    return result;
+  } finally {
+    if (mergedModelsInflight.get(cacheKey) === run) {
+      mergedModelsInflight.delete(cacheKey);
+    }
+  }
 }
 
 async function discoverOpenAIModels(homeDir: string): Promise<{
@@ -600,7 +637,8 @@ export function registerModelRoutes(app: Hono): void {
   app.get("/api/models", async (c) => {
     try {
       const targetApp = extractTargetAppDataDir(c);
-      const data = await fetchMergedLSModels(targetApp);
+      const force = c.req.query("refresh") === "1";
+      const data = await fetchMergedLSModels(targetApp, force);
       return c.json(data);
     } catch (err) {
       return handleRPCError(c, err);

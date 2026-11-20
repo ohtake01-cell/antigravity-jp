@@ -2,6 +2,7 @@
  * /api/conversations/* routes
  */
 
+import { createHash } from "node:crypto";
 import type { Hono } from "hono";
 import type { LSInstance } from "../discovery.js";
 import {
@@ -79,6 +80,63 @@ const VALID_AUTO_EXECUTION_POLICIES = new Set([
 const MAX_STEPS_LIMIT = 500;
 const MAX_TOTAL_CONVERSATIONS = 100;
 const MODEL_LABEL_MAP_TTL_MS = 30_000;
+const CONVERSATIONS_LIST_CACHE_TTL_MS = process.env.VITEST ? 0 : 2_000;
+
+interface CachedConversationsPayload {
+  fetchedAt: number;
+  payloadJson: string;
+  etag: string;
+}
+
+const conversationsListCache = new Map<string, CachedConversationsPayload>();
+const conversationsListInFlight = new Map<
+  string,
+  Promise<CachedConversationsPayload>
+>();
+let conversationsListCacheGen = 0;
+
+/**
+ * 会話一覧キャッシュを即座に無効化する。
+ * 新規作成・削除・タイトル/ピン/アーカイブ/プロジェクト変更時に呼び出し、
+ * ミューテーション中の in-flight 結果が古い一覧でキャッシュを汚染しないよう世代番号も進める。
+ */
+export function invalidateConversationsListCache(): void {
+  conversationsListCacheGen++;
+  conversationsListCache.clear();
+  conversationsListInFlight.clear();
+}
+
+interface CachedStepsPayload {
+  stepCount: number;
+  payloadJson: string;
+  etag: string;
+}
+
+const STEPS_CACHE_MAX_ENTRIES = 32;
+const idleStepsCache = new Map<string, CachedStepsPayload>();
+const idleStepsInFlight = new Map<string, Promise<CachedStepsPayload>>();
+
+/**
+ * 指定会話（または全会話）のアイドル時ステップキャッシュを即座に無効化する。
+ */
+export function invalidateConversationStepsCache(cascadeId?: string): void {
+  if (!cascadeId) {
+    idleStepsCache.clear();
+    idleStepsInFlight.clear();
+    return;
+  }
+  const needle = `:${cascadeId}:`;
+  for (const key of [...idleStepsCache.keys()]) {
+    if (key.includes(needle)) idleStepsCache.delete(key);
+  }
+  for (const key of [...idleStepsInFlight.keys()]) {
+    if (key.includes(needle)) idleStepsInFlight.delete(key);
+  }
+}
+
+conversationSignals.on("activate", (cascadeId: string) => {
+  invalidateConversationStepsCache(cascadeId);
+});
 
 interface ModelLabelMaps {
   idToLabel: Map<string, string>;
@@ -454,10 +512,54 @@ function warmUpDiskConversations(
 }
 
 
+function sendConversationsCachedResponse(
+  ifNoneMatch: string | undefined,
+  entry: CachedConversationsPayload,
+): Response {
+  if (ifNoneMatch && ifNoneMatch === entry.etag) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        ETag: entry.etag,
+        "Cache-Control": "no-cache",
+      },
+    });
+  }
+  return new Response(entry.payloadJson, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ETag: entry.etag,
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
 export function registerConversationRoutes(app: Hono): void {
   app.get("/api/conversations", async (c) => {
     try {
       const targetApp = extractTargetAppDataDir(c);
+      const cacheKey = targetApp ?? "__all__";
+      const ifNoneMatch = c.req.header("if-none-match");
+      const forceRefresh = c.req.query("refresh") === "1";
+
+      if (!forceRefresh && CONVERSATIONS_LIST_CACHE_TTL_MS > 0) {
+        const cached = conversationsListCache.get(cacheKey);
+        if (
+          cached &&
+          Date.now() - cached.fetchedAt < CONVERSATIONS_LIST_CACHE_TTL_MS
+        ) {
+          return sendConversationsCachedResponse(ifNoneMatch, cached);
+        }
+        const pending = conversationsListInFlight.get(cacheKey);
+        if (pending) {
+          const entry = await pending;
+          return sendConversationsCachedResponse(ifNoneMatch, entry);
+        }
+      }
+
+      const startGen = conversationsListCacheGen;
+      const computePromise = (async (): Promise<CachedConversationsPayload> => {
       const [projectNameMap, wsToProjectMap, diskAnnotationsMap, userMeta, instances] =
         await Promise.all([
           getProjectNameMap(),
@@ -1018,7 +1120,29 @@ export function registerConversationRoutes(app: Hono): void {
         warmUpDiskConversations(diskOnlyIds, instances);
       }
 
-      return c.json({ trajectorySummaries: finalMerged });
+      const payloadJson = JSON.stringify({ trajectorySummaries: finalMerged });
+      const etag = `W/"${createHash("sha1").update(payloadJson).digest("base64url").slice(0, 16)}"`;
+      return { fetchedAt: Date.now(), payloadJson, etag };
+      })();
+
+      if (CONVERSATIONS_LIST_CACHE_TTL_MS > 0) {
+        conversationsListInFlight.set(cacheKey, computePromise);
+      }
+
+      try {
+        const entry = await computePromise;
+        if (
+          CONVERSATIONS_LIST_CACHE_TTL_MS > 0 &&
+          conversationsListCacheGen === startGen
+        ) {
+          conversationsListCache.set(cacheKey, entry);
+        }
+        return sendConversationsCachedResponse(ifNoneMatch, entry);
+      } finally {
+        if (conversationsListInFlight.get(cacheKey) === computePromise) {
+          conversationsListInFlight.delete(cacheKey);
+        }
+      }
     } catch (err) {
       return handleRPCError(c, err);
     }
@@ -1216,26 +1340,95 @@ export function registerConversationRoutes(app: Hono): void {
       let stepCount: number | undefined;
       let pinnedInstance: LSInstance | undefined;
       let stepsArray: unknown[] = [];
+      let idleCacheKey: string | null = null;
+      const ifNoneMatch = c.req.header("if-none-match");
+      const tailParam = c.req.query("tail");
 
-      if (c.req.query("tail")) {
+      if (tailParam) {
+        let tailSize = parseInt(tailParam, 10);
+        if (isNaN(tailSize) || tailSize <= 0) {
+          tailSize = 100;
+        }
+        tailSize = Math.min(tailSize, MAX_STEPS_LIMIT);
+
         // readOnly=true: this endpoint only reads steps; the pinned instance
         // is NOT reused for mutations, so try-all fallback is safe and
         // necessary for disk-only conversations that no LS has in memory yet.
-        const sc = targetApp
-          ? await getStepCount(id, undefined, true, targetApp)
-          : await getStepCount(id, undefined, true);
-        pinnedInstance = sc.instance;
-        if (sc.count > 0) {
-          stepCount = sc.count;
-          let tailSize = parseInt(c.req.query("tail")!, 10);
-          if (isNaN(tailSize) || tailSize <= 0) {
-            tailSize = 100;
+        if (!process.env.VITEST) {
+          const summary = await getTrajectorySummary(
+            id,
+            undefined,
+            true,
+            targetApp,
+          );
+          if (summary) {
+            pinnedInstance = summary.instance;
+            if (summary.count > 0) {
+              stepCount = summary.count;
+              resolvedOffset = Math.max(0, stepCount - tailSize);
+              const isIdle = summary.status !== "CASCADE_RUN_STATUS_RUNNING";
+              if (isIdle) {
+                idleCacheKey = `${targetApp ?? "__all__"}:${id}:tail=${tailSize}:limit=${limit ?? ""}`;
+                const cached = idleStepsCache.get(idleCacheKey);
+                if (cached && cached.stepCount === stepCount) {
+                  // LRU 更新
+                  idleStepsCache.delete(idleCacheKey);
+                  idleStepsCache.set(idleCacheKey, cached);
+                  if (ifNoneMatch && ifNoneMatch === cached.etag) {
+                    return new Response(null, {
+                      status: 304,
+                      headers: {
+                        ETag: cached.etag,
+                        "Cache-Control": "no-cache",
+                      },
+                    });
+                  }
+                  return new Response(cached.payloadJson, {
+                    status: 200,
+                    headers: {
+                      "Content-Type": "application/json; charset=utf-8",
+                      ETag: cached.etag,
+                      "Cache-Control": "no-cache",
+                    },
+                  });
+                }
+                const pending = idleStepsInFlight.get(idleCacheKey);
+                if (pending) {
+                  const entry = await pending;
+                  if (ifNoneMatch && ifNoneMatch === entry.etag) {
+                    return new Response(null, {
+                      status: 304,
+                      headers: {
+                        ETag: entry.etag,
+                        "Cache-Control": "no-cache",
+                      },
+                    });
+                  }
+                  return new Response(entry.payloadJson, {
+                    status: 200,
+                    headers: {
+                      "Content-Type": "application/json; charset=utf-8",
+                      ETag: entry.etag,
+                      "Cache-Control": "no-cache",
+                    },
+                  });
+                }
+              }
+            }
           }
-          tailSize = Math.min(tailSize, MAX_STEPS_LIMIT);
-          resolvedOffset = Math.max(0, stepCount - tailSize);
+        } else {
+          const sc = targetApp
+            ? await getStepCount(id, undefined, true, targetApp)
+            : await getStepCount(id, undefined, true);
+          pinnedInstance = sc.instance;
+          if (sc.count > 0) {
+            stepCount = sc.count;
+            resolvedOffset = Math.max(0, stepCount - tailSize);
+          }
         }
       }
 
+      const fetchAndBuildPayload = async (): Promise<CachedStepsPayload> => {
       // We need to fetch until we get what we came for, or we run out of steps.
       let currentOffset = resolvedOffset;
       let targetCount =
@@ -1338,13 +1531,53 @@ export function registerConversationRoutes(app: Hono): void {
         stepsArray = stepsArray.slice(0, targetCount);
       }
 
-      return c.json({
+      const payloadJson = JSON.stringify({
         steps: sanitizeStepsForClient(
           messageTracker.annotateSteps(id, resolvedOffset, stepsArray),
         ),
         offset: resolvedOffset,
         ...(stepCount !== undefined ? { stepCount } : {}),
       });
+      const etag = `W/"${createHash("sha1").update(payloadJson).digest("base64url").slice(0, 16)}"`;
+      return { stepCount: stepCount ?? 0, payloadJson, etag };
+      };
+
+      const computePromise = fetchAndBuildPayload();
+      if (idleCacheKey) {
+        idleStepsInFlight.set(idleCacheKey, computePromise);
+      }
+
+      try {
+        const entry = await computePromise;
+        if (idleCacheKey && entry.stepCount > 0) {
+          if (idleStepsCache.size >= STEPS_CACHE_MAX_ENTRIES) {
+            const oldest = idleStepsCache.keys().next().value;
+            if (oldest) idleStepsCache.delete(oldest);
+          }
+          idleStepsCache.set(idleCacheKey, entry);
+        }
+        if (ifNoneMatch && ifNoneMatch === entry.etag) {
+          return new Response(null, {
+            status: 304,
+            headers: {
+              ETag: entry.etag,
+              "Cache-Control": "no-cache",
+            },
+          });
+        }
+        return new Response(entry.payloadJson, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            ETag: entry.etag,
+            "Cache-Control": "no-cache",
+          },
+        });
+      } finally {
+        if (idleCacheKey && idleStepsInFlight.get(idleCacheKey) === computePromise) {
+          idleStepsInFlight.delete(idleCacheKey);
+        }
+      }
     } catch (err) {
       return handleRPCError(c, err);
     }
@@ -1462,6 +1695,7 @@ export function registerConversationRoutes(app: Hono): void {
 
       // Signal WS connections for this conversation to enter ACTIVE state
       if (newId) conversationSignals.emit("activate", newId);
+      invalidateConversationsListCache();
 
       return c.json(data, 201);
     } catch (err) {
@@ -1673,6 +1907,7 @@ export function registerConversationRoutes(app: Hono): void {
             preSendStepCount,
           );
         }
+        invalidateConversationsListCache();
         return c.json(data);
       });
     } catch (err) {
@@ -1700,6 +1935,8 @@ export function registerConversationRoutes(app: Hono): void {
         : await rpcForConversation("CancelCascadeInvocation", id, {
           cascadeId: id,
         });
+      invalidateConversationStepsCache(id);
+      invalidateConversationsListCache();
       return c.json(data);
     } catch (err) {
       return handleRPCError(c, err);
@@ -1731,6 +1968,8 @@ export function registerConversationRoutes(app: Hono): void {
             cascadeId: id,
           });
         messageTracker.clearConversation(id);
+        invalidateConversationStepsCache(id);
+        invalidateConversationsListCache();
         return c.json(data);
       });
     } catch (err) {
@@ -1936,6 +2175,7 @@ export function registerConversationRoutes(app: Hono): void {
           : await rpcForConversation("RevertToCascadeStep", id, req);
         messageTracker.clearConversation(id);
         conversationSignals.emit("activate", id);
+        invalidateConversationsListCache();
         return c.json(data);
       });
     } catch (err) {
@@ -1980,6 +2220,7 @@ export function registerConversationRoutes(app: Hono): void {
       await saveManualTitleLock(id, title);
     }
     conversationSignals.emit("activate", id);
+    invalidateConversationsListCache();
     return c.json({ ok: true, id, title });
   });
 
@@ -2078,6 +2319,7 @@ export function registerConversationRoutes(app: Hono): void {
       );
     }
     conversationSignals.emit("activate", id);
+    invalidateConversationsListCache();
     return c.json({ ok: true, id, ...patch });
   });
 
@@ -2099,6 +2341,7 @@ export function registerConversationRoutes(app: Hono): void {
           : null;
       await setProjectAssignment(id, nextVal);
       conversationSignals.emit("activate", id);
+      invalidateConversationsListCache();
       return c.json({ ok: true, id, projectId: nextVal, projectName: null });
     }
 
@@ -2110,6 +2353,7 @@ export function registerConversationRoutes(app: Hono): void {
 
     await setProjectAssignment(id, rawProjectId);
     conversationSignals.emit("activate", id);
+    invalidateConversationsListCache();
     return c.json({ ok: true, id, projectId: rawProjectId, projectName });
   });
 

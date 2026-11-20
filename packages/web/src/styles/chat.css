@@ -279,6 +279,14 @@
   word-break: break-word;
 }
 
+/* 長い会話でも画面外のレイアウト・描画を自動スキップしてスクロールを滑らかに維持 */
+.chat-area-inner > .message,
+.chat-area-inner > .step-card,
+.chat-area-inner > .chat-block {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 84px;
+}
+
 /* ── Message bubbles ── */
 
 .message {

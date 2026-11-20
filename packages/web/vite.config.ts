@@ -77,6 +77,26 @@ export default defineConfig(({ mode }) => {
         scope: basePath,
       }),
     ],
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {
+                name: "vendor-react",
+                test: /node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/,
+                priority: 20,
+              },
+              {
+                name: "vendor-markdown",
+                test: /node_modules[\\/]marked[\\/]/,
+                priority: 15,
+              },
+            ],
+          },
+        },
+      },
+    },
     envDir: repoRoot,
     server: {
       host: env.PORTA_HOST || process.env.PORTA_HOST || "127.0.0.1",

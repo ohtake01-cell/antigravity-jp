@@ -100,7 +100,8 @@ renderer.image = function (token: Tokens.Image) {
     return escapeHtml(token.text);
   }
 
-  return originalImage(token);
+  const html = originalImage(token);
+  return html.replace(/^<img /, '<img loading="lazy" decoding="async" ');
 };
 
 marked.setOptions({ gfm: true, breaks: true, renderer });

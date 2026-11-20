@@ -5,10 +5,13 @@
  * ビルド済みの日本語 Web UI（packages/web/dist）も一体配信できる構成。
  */
 
+import { createHash } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { gzip as gzipCb } from "node:zlib";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createAdaptorServer } from "@hono/node-server";
@@ -31,8 +34,11 @@ import {
   resolveProxyHost,
 } from "./exposure.js";
 import { getAllowedOrigins, resolveCorsOrigin } from "./origins.js";
+import { gzipMiddleware } from "./compress.js";
 import { setupWebSocket } from "./ws.js";
 import { stopStandaloneCore } from "./core-manager.js";
+
+const gzipAsync = promisify(gzipCb);
 
 const PORT = parseInt(process.env.PORTA_PORT ?? "3470", 10);
 const HOST = resolveProxyHost();
@@ -51,6 +57,7 @@ app.use(
     origin: (origin) => resolveCorsOrigin(origin, ALLOWED_ORIGINS),
   }),
 );
+app.use("*", gzipMiddleware());
 
 // ── Health ──
 
@@ -128,11 +135,117 @@ const webDistDir = resolveWebDistDir();
 if (webDistDir) {
   const resolvedDist = resolve(webDistDir);
 
+  interface CachedStaticAsset {
+    raw: Buffer;
+    gzipped: Buffer | null;
+    mime: string;
+    etag: string;
+    mtimeMs: number;
+    isHashedAsset: boolean;
+  }
+
+  const staticCache = new Map<string, CachedStaticAsset>();
+  const STATIC_CACHE_MAX_ENTRIES = 96;
+  const COMPRESSIBLE_EXTS = new Set([
+    ".html",
+    ".js",
+    ".mjs",
+    ".css",
+    ".json",
+    ".webmanifest",
+    ".svg",
+    ".txt",
+  ]);
+
+  const loadStaticAsset = async (
+    filePath: string,
+    isHashedAsset: boolean,
+  ): Promise<CachedStaticAsset> => {
+    const cached = staticCache.get(filePath);
+    if (cached && isHashedAsset) {
+      return cached;
+    }
+
+    const st = await stat(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs) {
+      return cached;
+    }
+
+    const raw = await readFile(filePath);
+    const ext = extname(filePath).toLowerCase();
+    const mime = MIME_TYPES[ext] ?? "application/octet-stream";
+    const etag = `W/"${createHash("sha1").update(raw).digest("base64url").slice(0, 16)}"`;
+    let gzipped: Buffer | null = null;
+    if (COMPRESSIBLE_EXTS.has(ext) && raw.byteLength >= 1024) {
+      const gz = await gzipAsync(raw, { level: 6 });
+      if (gz.byteLength < raw.byteLength) {
+        gzipped = gz;
+      }
+    }
+
+    const entry: CachedStaticAsset = {
+      raw,
+      gzipped,
+      mime,
+      etag,
+      mtimeMs: st.mtimeMs,
+      isHashedAsset,
+    };
+
+    if (staticCache.size >= STATIC_CACHE_MAX_ENTRIES) {
+      const oldestKey = staticCache.keys().next().value;
+      if (oldestKey) staticCache.delete(oldestKey);
+    }
+    staticCache.set(filePath, entry);
+    return entry;
+  };
+
+  const buildStaticResponse = (
+    asset: CachedStaticAsset,
+    acceptEncoding: string,
+    ifNoneMatch: string | undefined,
+  ): Response => {
+    const cacheControl = asset.isHashedAsset
+      ? "public, max-age=31536000, immutable"
+      : "no-cache";
+
+    if (ifNoneMatch && ifNoneMatch === asset.etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: asset.etag,
+          "Cache-Control": cacheControl,
+          Vary: "Accept-Encoding",
+        },
+      });
+    }
+
+    const useGzip = Boolean(asset.gzipped) && /\bgzip\b/i.test(acceptEncoding);
+    const body = useGzip ? asset.gzipped! : asset.raw;
+    const headers: Record<string, string> = {
+      "Content-Type": asset.mime,
+      "Content-Length": String(body.byteLength),
+      ETag: asset.etag,
+      "Cache-Control": cacheControl,
+      Vary: "Accept-Encoding",
+    };
+    if (useGzip) {
+      headers["Content-Encoding"] = "gzip";
+    }
+    return new Response(new Uint8Array(body), {
+      status: 200,
+      headers,
+    });
+  };
+
   app.get("*", async (c) => {
     const reqPath = c.req.path;
     if (reqPath.startsWith("/api/") || reqPath === "/ws") {
       return c.notFound();
     }
+
+    const acceptEncoding = c.req.header("accept-encoding") ?? "";
+    const ifNoneMatch = c.req.header("if-none-match");
 
     const rel = reqPath === "/" ? "index.html" : reqPath.replace(/^\/+/, "");
     const safePath = resolve(resolvedDist, normalize(rel));
@@ -142,29 +255,15 @@ if (webDistDir) {
       existsSync(safePath) &&
       statSync(safePath).isFile()
     ) {
-      const content = await readFile(safePath);
-      const mime = MIME_TYPES[extname(safePath).toLowerCase()] ?? "application/octet-stream";
       const isHashedAsset = rel.startsWith("assets/");
-      return new Response(content, {
-        status: 200,
-        headers: {
-          "Content-Type": mime,
-          "Cache-Control": isHashedAsset
-            ? "public, max-age=31536000, immutable"
-            : "no-cache",
-        },
-      });
+      const asset = await loadStaticAsset(safePath, isHashedAsset);
+      return buildStaticResponse(asset, acceptEncoding, ifNoneMatch);
     }
 
     // SPA フォールバック
-    const indexHtml = await readFile(join(resolvedDist, "index.html"));
-    return new Response(indexHtml, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-cache",
-      },
-    });
+    const indexPath = join(resolvedDist, "index.html");
+    const indexAsset = await loadStaticAsset(indexPath, false);
+    return buildStaticResponse(indexAsset, acceptEncoding, ifNoneMatch);
   });
 }
 

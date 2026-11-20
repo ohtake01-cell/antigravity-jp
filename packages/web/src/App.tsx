@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import {
   Routes,
   Route,
@@ -11,13 +11,35 @@ import { Sidebar } from "./components/Sidebar";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatPanel } from "./components/ChatPanel";
 import { ChatInput } from "./components/ChatInput";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { MultiAIPanel } from "./components/MultiAIPanel";
-import { CommandPalette } from "./components/CommandPalette";
-import { ArtifactWorkbench } from "./components/ArtifactWorkbench";
-import { AgentMonitorPanel } from "./components/AgentMonitorPanel";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import { IconFolder } from "./components/Icons";
+
+// 初期チャット画面に不要な大型パネルは遅延ロードで初期バンドルを軽量化
+const SettingsPanel = lazy(() =>
+  import("./components/SettingsPanel").then((m) => ({
+    default: m.SettingsPanel,
+  })),
+);
+const MultiAIPanel = lazy(() =>
+  import("./components/MultiAIPanel").then((m) => ({
+    default: m.MultiAIPanel,
+  })),
+);
+const CommandPalette = lazy(() =>
+  import("./components/CommandPalette").then((m) => ({
+    default: m.CommandPalette,
+  })),
+);
+const ArtifactWorkbench = lazy(() =>
+  import("./components/ArtifactWorkbench").then((m) => ({
+    default: m.ArtifactWorkbench,
+  })),
+);
+const AgentMonitorPanel = lazy(() =>
+  import("./components/AgentMonitorPanel").then((m) => ({
+    default: m.AgentMonitorPanel,
+  })),
+);
 import { useConversations } from "./hooks/useConversations";
 import { usePolling } from "./hooks/usePolling";
 import { useWorkspaces, slugFromUri } from "./hooks/useWorkspaces";
@@ -38,6 +60,43 @@ import type { PlannerType } from "./components/ChatInput";
 
 const LAST_CHAT_PATH_KEY = "antigravity-jp:lastChatPath";
 
+function readValidSavedChatPath(): string | null {
+  try {
+    const saved =
+      localStorage.getItem(LAST_CHAT_PATH_KEY) ??
+      sessionStorage.getItem(LAST_CHAT_PATH_KEY);
+    if (
+      saved &&
+      /^\/[^/\s]+(?:\/[^/\s]+)?$/.test(saved) &&
+      !saved.endsWith("/settings") &&
+      !saved.endsWith("/multi-ai") &&
+      !saved.startsWith("/api")
+    ) {
+      return saved;
+    }
+  } catch {
+    // ストレージ制限時は無視
+  }
+  return null;
+}
+
+function PanelLoadingFallback() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: 1,
+        minHeight: 160,
+        color: "var(--text-secondary, #9ca3af)",
+      }}
+    >
+      <div className="spinner" />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
@@ -50,12 +109,15 @@ export default function App() {
   );
 }
 
-// ── Root redirect: go to the first workspace's new-chat page ──
+// ── Root redirect: 前回パスがあれば 0ms 即時復元、初回のみワークスペース取得 ──
 
 function RootRedirect() {
-  const [target, setTarget] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(() =>
+    readValidSavedChatPath(),
+  );
 
   useEffect(() => {
+    if (target) return;
     let settled = false;
     const fallbackTimer = window.setTimeout(() => {
       if (!settled) {
@@ -87,7 +149,7 @@ function RootRedirect() {
     return () => {
       window.clearTimeout(fallbackTimer);
     };
-  }, []);
+  }, [target]);
 
   if (target) return <Navigate to={target} replace />;
   return (
@@ -210,12 +272,13 @@ function ChatView() {
     };
   }, []);
 
-  // Remember the last chat route so toggling back from Settings / Multi-AI restores exact chat
+  // Remember the last chat route so toggling back from Settings / Multi-AI or reopening '/' restores exact chat immediately
   useEffect(() => {
     if (!isSettingsPage && !isMultiAIPage && location.pathname !== "/") {
       lastChatPathRef.current = location.pathname;
       try {
         sessionStorage.setItem(LAST_CHAT_PATH_KEY, location.pathname);
+        localStorage.setItem(LAST_CHAT_PATH_KEY, location.pathname);
       } catch {
         // Ignore restricted storage
       }
@@ -902,25 +965,29 @@ function ChatView() {
             );
           })()}
         {isSettingsPage ? (
-          <SettingsPanel
-            settings={settings}
-            onUpdate={updateSettings}
-            onBack={handleBackToChat}
-            onRefreshConversations={refresh}
-            onOpenRestoredChat={(id, summary) => {
-              const uri = summary.workspaces?.[0]?.workspaceFolderAbsoluteUri;
-              const slug = uri ? slugFromUri(uri) : (projectSlug ?? "unknown");
-              setOptimisticMessages([]);
-              navigate(`/${slug}/${id}`);
-            }}
-          />
+          <Suspense fallback={<PanelLoadingFallback />}>
+            <SettingsPanel
+              settings={settings}
+              onUpdate={updateSettings}
+              onBack={handleBackToChat}
+              onRefreshConversations={refresh}
+              onOpenRestoredChat={(id, summary) => {
+                const uri = summary.workspaces?.[0]?.workspaceFolderAbsoluteUri;
+                const slug = uri ? slugFromUri(uri) : (projectSlug ?? "unknown");
+                setOptimisticMessages([]);
+                navigate(`/${slug}/${id}`);
+              }}
+            />
+          </Suspense>
         ) : isMultiAIPage && isProTier ? (
-          <MultiAIPanel
-            currentWorkspaceUri={currentWorkspaceUri}
-            initialSessionId={multiAISessionId}
-            onBackToGemini={handleBackToChat}
-            onOpenSettings={handleOpenSettings}
-          />
+          <Suspense fallback={<PanelLoadingFallback />}>
+            <MultiAIPanel
+              currentWorkspaceUri={currentWorkspaceUri}
+              initialSessionId={multiAISessionId}
+              onBackToGemini={handleBackToChat}
+              onOpenSettings={handleOpenSettings}
+            />
+          </Suspense>
         ) : activeId ? (
           <ChatPanel
             key={`${activeId}:${settings.targetApp}`}
@@ -1098,74 +1165,86 @@ function ChatView() {
           />
         )}
       </div>
-      <ArtifactWorkbench
-        isOpen={workbenchOpen}
-        initialFileRef={workbenchFileRef}
-        currentWorkspaceUri={currentWorkspaceUri}
-        onClose={() => setWorkbenchOpen(false)}
-      />
-      <AgentMonitorPanel
-        isOpen={agentPanelOpen && !isSettingsPage && !isMultiAIPage}
-        conversationId={activeContextParent?.id ?? activeId}
-        activeId={activeId}
-        onClose={() => setAgentPanelOpen(false)}
-        onOpenConversation={(id) => {
-          setOptimisticMessages([]);
-          navigate(chatUrl(id));
-          if (isMobile()) setSidebarOpen(false);
-        }}
-      />
-      <CommandPalette
-        isOpen={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        conversations={conversations}
-        canBranchSideChat={Boolean(!isSettingsPage && !isMultiAIPage && activeId)}
-        workbenchOpen={workbenchOpen}
-        onNewChat={handleNew}
-        onSelectChat={(id) => {
-          setOptimisticMessages([]);
-          navigate(chatUrl(id));
-          if (isMobile()) setSidebarOpen(false);
-        }}
-        onOpenSettings={handleOpenSettings}
-        onToggleWorkbench={() => setWorkbenchOpen((v) => !v)}
-        onOpenFileInWorkbench={(filePath) => {
-          setWorkbenchFileRef(filePath);
-          setWorkbenchOpen(true);
-        }}
-        onOpenSideChat={() => {
-          setSideChatTarget(null);
-          setSideChatOpen(true);
-        }}
-        onTriggerVoice={() => {
-          window.dispatchEvent(
-            new CustomEvent("antigravity-jp-voice-trigger"),
-          );
-        }}
-        appTier={appTier}
-        onOpenMultiAI={() => handleOpenMultiAI()}
-        onQuickDispatch={async (provider: ProviderId, promptText: string) => {
-          if (provider === "antigravity" || !isProTier) {
-            await launchGeminiChatWithPrompt(promptText);
-            return;
-          }
-          const extProvider: ExternalProviderId =
-            provider === "codex"
-              ? "openai"
-              : provider === "claude"
-                ? "anthropic"
-                : "ollama";
-          const workspaceDir = currentWorkspaceUri?.startsWith("file://")
-            ? decodeURIComponent(new URL(currentWorkspaceUri).pathname)
-            : undefined;
-          const res = await api.createProviderSession({
-            provider: extProvider,
-            prompt: promptText,
-            workspaceDir,
-          });
-          handleOpenMultiAI(res.session.id);
-        }}
-      />
+      {workbenchOpen && (
+        <Suspense fallback={null}>
+          <ArtifactWorkbench
+            isOpen={workbenchOpen}
+            initialFileRef={workbenchFileRef}
+            currentWorkspaceUri={currentWorkspaceUri}
+            onClose={() => setWorkbenchOpen(false)}
+          />
+        </Suspense>
+      )}
+      {agentPanelOpen && !isSettingsPage && !isMultiAIPage && (
+        <Suspense fallback={null}>
+          <AgentMonitorPanel
+            isOpen={true}
+            conversationId={activeContextParent?.id ?? activeId}
+            activeId={activeId}
+            onClose={() => setAgentPanelOpen(false)}
+            onOpenConversation={(id) => {
+              setOptimisticMessages([]);
+              navigate(chatUrl(id));
+              if (isMobile()) setSidebarOpen(false);
+            }}
+          />
+        </Suspense>
+      )}
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            isOpen={paletteOpen}
+            onClose={() => setPaletteOpen(false)}
+            conversations={conversations}
+            canBranchSideChat={Boolean(!isSettingsPage && !isMultiAIPage && activeId)}
+            workbenchOpen={workbenchOpen}
+            onNewChat={handleNew}
+            onSelectChat={(id) => {
+              setOptimisticMessages([]);
+              navigate(chatUrl(id));
+              if (isMobile()) setSidebarOpen(false);
+            }}
+            onOpenSettings={handleOpenSettings}
+            onToggleWorkbench={() => setWorkbenchOpen((v) => !v)}
+            onOpenFileInWorkbench={(filePath) => {
+              setWorkbenchFileRef(filePath);
+              setWorkbenchOpen(true);
+            }}
+            onOpenSideChat={() => {
+              setSideChatTarget(null);
+              setSideChatOpen(true);
+            }}
+            onTriggerVoice={() => {
+              window.dispatchEvent(
+                new CustomEvent("antigravity-jp-voice-trigger"),
+              );
+            }}
+            appTier={appTier}
+            onOpenMultiAI={() => handleOpenMultiAI()}
+            onQuickDispatch={async (provider: ProviderId, promptText: string) => {
+              if (provider === "antigravity" || !isProTier) {
+                await launchGeminiChatWithPrompt(promptText);
+                return;
+              }
+              const extProvider: ExternalProviderId =
+                provider === "codex"
+                  ? "openai"
+                  : provider === "claude"
+                    ? "anthropic"
+                    : "ollama";
+              const workspaceDir = currentWorkspaceUri?.startsWith("file://")
+                ? decodeURIComponent(new URL(currentWorkspaceUri).pathname)
+                : undefined;
+              const res = await api.createProviderSession({
+                provider: extProvider,
+                prompt: promptText,
+                workspaceDir,
+              });
+              handleOpenMultiAI(res.session.id);
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
