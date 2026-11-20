@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import type { ConversationEntry } from "../hooks/useConversations";
 import { getAppIconUrl } from "../hooks/useClientSettings";
 import type { AppIconPreset, AppTier, ProjectEntry } from "../types";
@@ -287,170 +288,197 @@ function ContextMenu({
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
   useEffect(() => {
-    const handler = (e: MouseEvent | TouchEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", handler);
-    document.addEventListener("touchstart", handler);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("touchstart", handler);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose]);
 
   const projectList = projects ?? [];
 
-  return (
+  const menuContent = (
     <div
-      ref={ref}
-      className="context-menu"
-      onClick={(e) => e.stopPropagation()}
-      onTouchStart={(e) => e.stopPropagation()}
+      className="context-menu-overlay"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+      }}
     >
-      <div className="context-menu-header" title={title}>
-        {title}
-      </div>
-      <button
-        type="button"
-        className="context-menu-item"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRename();
-          onClose();
-        }}
+      <div
+        ref={ref}
+        className="context-menu context-menu-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${title}のメニュー`}
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
       >
-        <span>✏️ 名前を変更</span>
-      </button>
-      <button
-        type="button"
-        className="context-menu-item"
-        onClick={(e) => {
-          e.stopPropagation();
-          onTogglePin();
-          onClose();
-        }}
-      >
-        <span>{isPinned ? "📌 ピン留めを解除" : "📌 ピン留め"}</span>
-      </button>
-      {onAssignProject && (
-        <div className="context-menu-project-section">
+        <div className="context-menu-header-row">
+          <div className="context-menu-header" title={title}>
+            {title}
+          </div>
           <button
             type="button"
-            className={`context-menu-item ${projectPickerOpen ? "expanded" : ""}`}
+            className="context-menu-close-btn"
+            aria-label="メニューを閉じる"
             onClick={(e) => {
               e.stopPropagation();
-              setProjectPickerOpen((v) => !v);
+              onClose();
             }}
           >
-            <span>📁 プロジェクトに追加・移動</span>
-            <span className="context-menu-caret">
-              {projectPickerOpen ? "▴" : "▾"}
-            </span>
+            ✕
           </button>
-          {projectPickerOpen && (
-            <div
-              className="context-menu-project-list"
-              role="group"
-              aria-label="移動先プロジェクトを選択"
-            >
-              {projectList.length === 0 ? (
-                <div className="context-menu-project-empty">
-                  プロジェクトがまだありません
-                </div>
-              ) : (
-                projectList.map((proj) => {
-                  const isCurrent = proj.id === currentProjectId;
-                  return (
-                    <button
-                      key={proj.id}
-                      type="button"
-                      className={`context-menu-project-item ${isCurrent ? "active" : ""}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAssignProject(proj.id);
-                        onClose();
-                      }}
-                    >
-                      <span className="context-menu-project-name">
-                        {proj.name}
-                      </span>
-                      {isCurrent && (
-                        <span className="context-menu-project-check">✓</span>
-                      )}
-                    </button>
-                  );
-                })
-              )}
-              {hasManualProject && (
-                <button
-                  type="button"
-                  className="context-menu-project-item remove"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAssignProject(null);
-                    onClose();
-                  }}
-                >
-                  <span>↩ プロジェクトから外す</span>
-                </button>
-              )}
-              {onOpenAddProject && (
-                <button
-                  type="button"
-                  className="context-menu-project-item add-new"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenAddProject();
-                    onClose();
-                  }}
-                >
-                  <span>＋ 新しいプロジェクトを作成</span>
-                </button>
-              )}
-            </div>
-          )}
         </div>
-      )}
-      {onBranchSideChat && (
         <button
           type="button"
           className="context-menu-item"
           onClick={(e) => {
             e.stopPropagation();
-            onBranchSideChat();
+            onRename();
             onClose();
           }}
         >
-          <span>🌿 枝分かれ</span>
+          <span>✏️ 名前を変更</span>
         </button>
-      )}
-      <button
-        type="button"
-        className="context-menu-item"
-        onClick={(e) => {
-          e.stopPropagation();
-          onArchive();
-          onClose();
-        }}
-      >
-        <span>📦 アーカイブへ移動</span>
-      </button>
-      <div className="context-menu-divider" />
-      <button
-        type="button"
-        className="context-menu-item danger"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-          onClose();
-        }}
-      >
-        <span>🗑️ 削除</span>
-      </button>
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin();
+            onClose();
+          }}
+        >
+          <span>{isPinned ? "📌 ピン留めを解除" : "📌 ピン留め"}</span>
+        </button>
+        {onAssignProject && (
+          <div className="context-menu-project-section">
+            <button
+              type="button"
+              className={`context-menu-item ${projectPickerOpen ? "expanded" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setProjectPickerOpen((v) => !v);
+              }}
+            >
+              <span>📁 プロジェクトに追加・移動</span>
+              <span className="context-menu-caret">
+                {projectPickerOpen ? "▴" : "▾"}
+              </span>
+            </button>
+            {projectPickerOpen && (
+              <div
+                className="context-menu-project-list"
+                role="group"
+                aria-label="移動先プロジェクトを選択"
+              >
+                {projectList.length === 0 ? (
+                  <div className="context-menu-project-empty">
+                    プロジェクトがまだありません
+                  </div>
+                ) : (
+                  projectList.map((proj) => {
+                    const isCurrent = proj.id === currentProjectId;
+                    return (
+                      <button
+                        key={proj.id}
+                        type="button"
+                        className={`context-menu-project-item ${isCurrent ? "active" : ""}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAssignProject(proj.id);
+                          onClose();
+                        }}
+                      >
+                        <span className="context-menu-project-name">
+                          {proj.name}
+                        </span>
+                        {isCurrent && (
+                          <span className="context-menu-project-check">✓</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+                {hasManualProject && (
+                  <button
+                    type="button"
+                    className="context-menu-project-item remove"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAssignProject(null);
+                      onClose();
+                    }}
+                  >
+                    <span>↩ プロジェクトから外す</span>
+                  </button>
+                )}
+                {onOpenAddProject && (
+                  <button
+                    type="button"
+                    className="context-menu-project-item add-new"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenAddProject();
+                      onClose();
+                    }}
+                  >
+                    <span>＋ 新しいプロジェクトを作成</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {onBranchSideChat && (
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              onBranchSideChat();
+              onClose();
+            }}
+          >
+            <span>🌿 枝分かれ</span>
+          </button>
+        )}
+        <button
+          type="button"
+          className="context-menu-item"
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive();
+            onClose();
+          }}
+        >
+          <span>📦 アーカイブへ移動</span>
+        </button>
+        <div className="context-menu-divider" />
+        <button
+          type="button"
+          className="context-menu-item danger"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+            onClose();
+          }}
+        >
+          <span>🗑️ 削除</span>
+        </button>
+      </div>
     </div>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(menuContent, document.body)
+    : menuContent;
 }
 
 // ── Sidebar action items ──
@@ -519,9 +547,23 @@ export function Sidebar({
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editProjectName, setEditProjectName] = useState("");
   const [editProjectFolder, setEditProjectFolder] = useState("");
+  const [editClearFolder, setEditClearFolder] = useState(false);
   const [editCreateFolder, setEditCreateFolder] = useState(false);
   const [editProjectSaving, setEditProjectSaving] = useState(false);
   const [editProjectError, setEditProjectError] = useState<string | null>(null);
+  const [sidebarToast, setSidebarToast] = useState<{
+    text: string;
+    isError?: boolean;
+  } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSidebarToast = useCallback((text: string, isError = false) => {
+    setSidebarToast({ text, isError });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      setSidebarToast(null);
+      toastTimerRef.current = null;
+    }, 2800);
+  }, []);
   const projectLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -561,17 +603,12 @@ export function Sidebar({
 
   useEffect(() => {
     if (!projectMenuId) return;
-    const onOutside = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target?.closest?.(".sidebar-project-menu-wrap")) {
-        setProjectMenuId(null);
-      }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProjectMenuId(null);
     };
-    document.addEventListener("mousedown", onOutside);
-    document.addEventListener("touchstart", onOutside);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener("mousedown", onOutside);
-      document.removeEventListener("touchstart", onOutside);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [projectMenuId]);
 
@@ -606,14 +643,18 @@ export function Sidebar({
     [newProjectFolder, newProjectName, projectSaving],
   );
 
-  const handleStartEditProject = useCallback((proj: ProjectEntry) => {
-    setEditingProjectId(proj.id);
-    setEditProjectName(proj.name);
-    setEditProjectFolder(proj.folderPath ?? "");
-    setEditCreateFolder(false);
-    setEditProjectError(null);
-    setProjectMenuId(null);
-  }, []);
+  const handleStartEditProject = useCallback(
+    (proj: ProjectEntry) => {
+      setEditingProjectId(proj.id);
+      setEditProjectName(proj.name);
+      setEditProjectFolder(proj.folderPath || defaultProjectFolder || "");
+      setEditClearFolder(false);
+      setEditCreateFolder(false);
+      setEditProjectError(null);
+      setProjectMenuId(null);
+    },
+    [defaultProjectFolder],
+  );
 
   const handleSaveEditProject = useCallback(
     async (
@@ -633,7 +674,8 @@ export function Sidebar({
       try {
         const res = await api.updateProject(projId, {
           name: trimmedName,
-          folderPath: editProjectFolder.trim(),
+          folderPath: editClearFolder ? "" : editProjectFolder.trim(),
+          clearFolder: editClearFolder,
           createFolderIfMissing: editCreateFolder,
           preserveConversationIds,
         });
@@ -642,6 +684,9 @@ export function Sidebar({
             prev.map((p) => (p.id === projId ? res.project : p)),
           );
           setEditingProjectId(null);
+          showSidebarToast(
+            `「${res.project.name}」を更新しました${res.project.folderPath ? ` (${res.project.folderPath})` : ""}`,
+          );
           onRefresh?.();
         }
       } catch (err) {
@@ -656,7 +701,9 @@ export function Sidebar({
       editProjectSaving,
       editProjectName,
       editProjectFolder,
+      editClearFolder,
       editCreateFolder,
+      showSidebarToast,
       onRefresh,
     ],
   );
@@ -720,16 +767,27 @@ export function Sidebar({
     async (conv: ConversationEntry, projectId: string | null) => {
       const nextOverride = projectId ?? UNASSIGNED_PROJECT_ID;
       setLocalProjectOverrides((prev) => ({ ...prev, [conv.id]: nextOverride }));
+      const targetProj = projectId
+        ? projects.find((p) => p.id === projectId)
+        : undefined;
       if (projectId) {
         const key = `proj:${projectId}`;
         setCollapsed((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
         setExpanded((prev) => ({ ...prev, [key]: true }));
+        setTimeout(() => {
+          const el = document.querySelector(`[data-project-id="${projectId}"]`);
+          el?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+        }, 80);
       }
       try {
         if (projectId) {
           await api.assignConversationProject(conv.id, projectId);
+          showSidebarToast(
+            `📁 「${targetProj?.name ?? "プロジェクト"}」へ移動しました`,
+          );
         } else {
           await api.assignConversationProject(conv.id, null, true);
+          showSidebarToast("↩ プロジェクトから外しました");
         }
         onRefresh?.();
       } catch (err) {
@@ -739,9 +797,15 @@ export function Sidebar({
           delete next[conv.id];
           return next;
         });
+        showSidebarToast(
+          err instanceof Error
+            ? `移動に失敗しました: ${err.message}`
+            : "プロジェクトの移動に失敗しました",
+          true,
+        );
       }
     },
-    [onRefresh],
+    [projects, showSidebarToast, onRefresh],
   );
 
   const matchConversationProject = useCallback(
@@ -1461,6 +1525,12 @@ export function Sidebar({
                             : isActive
                               ? "● 現在操作中 (実行中)..."
                               : "● バックグラウンド実行中..."}
+                          {displayProjectName && (
+                            <span className="sidebar-meta-project">
+                              {" · "}
+                              {displayProjectName}
+                            </span>
+                          )}
                         </span>
                       ) : (
                         <span className="sidebar-meta-details">
@@ -1565,6 +1635,9 @@ export function Sidebar({
                 }
                 onOpenAddProject={() => {
                   setAddProjectOpen(true);
+                  if (!newProjectFolder && defaultProjectFolder) {
+                    setNewProjectFolder(defaultProjectFolder);
+                  }
                   setProjectError(null);
                 }}
                 onBranchSideChat={
@@ -1729,6 +1802,15 @@ export function Sidebar({
       </div>
 
       {/* Unified scroll body so actions/filters/projects scroll together on phone & desktop */}
+      {sidebarToast && (
+        <div
+          className={`sidebar-toast ${sidebarToast.isError ? "error" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {sidebarToast.text}
+        </div>
+      )}
       <div className="sidebar-scroll-body">
       {/* Action buttons */}
       <div className="sidebar-actions">
@@ -1887,7 +1969,13 @@ export function Sidebar({
                     title="プロジェクトを追加"
                     aria-label="プロジェクトを追加"
                     onClick={() => {
-                      setAddProjectOpen((v) => !v);
+                      setAddProjectOpen((v) => {
+                        const next = !v;
+                        if (next && !newProjectFolder && defaultProjectFolder) {
+                          setNewProjectFolder(defaultProjectFolder);
+                        }
+                        return next;
+                      });
                       setProjectError(null);
                     }}
                   >
@@ -1963,6 +2051,7 @@ export function Sidebar({
                 return (
                   <div
                     key={groupKey}
+                    data-project-id={proj?.id}
                     className={`workspace-group ${proj ? "project-workspace-group" : ""}`}
                   >
                     {proj ? (
@@ -2048,7 +2137,17 @@ export function Sidebar({
                         >
                           <IconFolder size={13} />
                         </span>
-                        <span className="workspace-group-name">{proj.name}</span>
+                        <span className="sidebar-project-name-wrap">
+                          <span className="workspace-group-name">{proj.name}</span>
+                          {proj.folderPath && (
+                            <span
+                              className="sidebar-project-path-sub"
+                              title={proj.folderPath}
+                            >
+                              {proj.folderPath}
+                            </span>
+                          )}
+                        </span>
                         {totalCount > 0 && (
                           <span className="workspace-group-count">
                             {totalCount}
@@ -2073,60 +2172,108 @@ export function Sidebar({
                             >
                               <IconMore size={14} />
                             </button>
-                            {projectMenuId === proj.id && (
-                              <div
-                                className="sidebar-project-dropdown"
-                                role="menu"
-                              >
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  className="sidebar-project-dropdown-item"
-                                  onClick={() => {
-                                    setProjectMenuId(null);
-                                    if (onNewInProject) onNewInProject(proj);
-                                    else onNew();
-                                  }}
-                                >
-                                  ＋ 新規チャットを作成
-                                </button>
-                                {!proj.isDefaultCli && (
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="sidebar-project-dropdown-item"
-                                    onClick={() => handleStartEditProject(proj)}
-                                  >
-                                    ✏️ 名前・パスを編集
-                                  </button>
-                                )}
-                                {proj.folderPath && (
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="sidebar-project-dropdown-item"
-                                    onClick={() => {
-                                      void navigator.clipboard?.writeText(
-                                        proj.folderPath!,
-                                      );
-                                      setProjectMenuId(null);
+                            {projectMenuId === proj.id &&
+                              (() => {
+                                const sheet = (
+                                  <div
+                                    className="context-menu-overlay"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (e.target === e.currentTarget) {
+                                        setProjectMenuId(null);
+                                      }
                                     }}
+                                    onTouchStart={(e) => e.stopPropagation()}
                                   >
-                                    📋 パスをコピー
-                                  </button>
-                                )}
-                                {!proj.isDefaultCli && (
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="sidebar-project-dropdown-item danger"
-                                    onClick={() => void handleDeleteProject(proj)}
-                                  >
-                                    🗑️ プロジェクトを除去
-                                  </button>
-                                )}
-                              </div>
-                            )}
+                                    <div
+                                      className="context-menu context-menu-sheet"
+                                      role="menu"
+                                      aria-label={`${proj.name}のプロジェクトメニュー`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onTouchStart={(e) => e.stopPropagation()}
+                                    >
+                                      <div className="context-menu-header-row">
+                                        <div
+                                          className="context-menu-header"
+                                          title={proj.folderPath || proj.name}
+                                        >
+                                          📁 {proj.name}
+                                          {proj.folderPath
+                                            ? ` (${proj.folderPath})`
+                                            : ""}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="context-menu-close-btn"
+                                          aria-label="閉じる"
+                                          onClick={() => setProjectMenuId(null)}
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        className="context-menu-item"
+                                        onClick={() => {
+                                          setProjectMenuId(null);
+                                          if (onNewInProject)
+                                            onNewInProject(proj);
+                                          else onNew();
+                                        }}
+                                      >
+                                        <span>＋ 新規チャットを作成</span>
+                                      </button>
+                                      {!proj.isDefaultCli && (
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          className="context-menu-item"
+                                          onClick={() =>
+                                            handleStartEditProject(proj)
+                                          }
+                                        >
+                                          <span>✏️ 名前・パスを編集</span>
+                                        </button>
+                                      )}
+                                      {proj.folderPath && (
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          className="context-menu-item"
+                                          onClick={() => {
+                                            void navigator.clipboard?.writeText(
+                                              proj.folderPath!,
+                                            );
+                                            setProjectMenuId(null);
+                                            showSidebarToast("📋 パスをコピーしました");
+                                          }}
+                                        >
+                                          <span>📋 パスをコピー</span>
+                                        </button>
+                                      )}
+                                      {!proj.isDefaultCli && (
+                                        <>
+                                          <div className="context-menu-divider" />
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="context-menu-item danger"
+                                            onClick={() =>
+                                              void handleDeleteProject(proj)
+                                            }
+                                          >
+                                            <span>🗑️ プロジェクトを除去</span>
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                                return typeof document !== "undefined"
+                                  ? createPortal(sheet, document.body)
+                                  : sheet;
+                              })()}
                           </div>
                           <button
                             type="button"
@@ -2192,11 +2339,18 @@ export function Sidebar({
                         <input
                           type="text"
                           className="sidebar-project-input"
-                          placeholder="フォルダパス（空欄でフォルダ紐づけ解除）"
+                          placeholder={
+                            defaultProjectFolder
+                              ? `フォルダパス（空欄で ${defaultProjectFolder}）`
+                              : "フォルダパス（例: ~/Projects）"
+                          }
                           aria-label="フォルダパスを編集"
-                          value={editProjectFolder}
-                          onChange={(e) => setEditProjectFolder(e.target.value)}
-                          disabled={editProjectSaving}
+                          value={editClearFolder ? "" : editProjectFolder}
+                          onChange={(e) => {
+                            setEditClearFolder(false);
+                            setEditProjectFolder(e.target.value);
+                          }}
+                          disabled={editProjectSaving || editClearFolder}
                         />
                         <label
                           style={{
@@ -2212,9 +2366,27 @@ export function Sidebar({
                             type="checkbox"
                             checked={editCreateFolder}
                             onChange={(e) => setEditCreateFolder(e.target.checked)}
-                            disabled={editProjectSaving}
+                            disabled={editProjectSaving || editClearFolder}
                           />
                           <span>フォルダが無い場合は自動作成する</span>
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            fontSize: "11px",
+                            color: "var(--text-tertiary)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editClearFolder}
+                            onChange={(e) => setEditClearFolder(e.target.checked)}
+                            disabled={editProjectSaving}
+                          />
+                          <span>フォルダ紐づけなしにする（名前だけ）</span>
                         </label>
                         {editProjectError && (
                           <div className="sidebar-project-error">

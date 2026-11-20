@@ -164,6 +164,7 @@ export const api = {
     payload: {
       name?: string;
       folderPath?: string;
+      clearFolder?: boolean;
       createFolderIfMissing?: boolean;
       preserveConversationIds?: string[];
     },

@@ -9,9 +9,13 @@
  *    `pinned: false` が上書きされずピン留めが復活する不具合を防ぐための確定状態
  * 2. projectAssignments: 既存チャットを手動でプロジェクト配下へ移動した割り当て
  * 3. projectSettings: 新規プロジェクト作成時のデフォルトフォルダ設定（配布時は空欄）
+ *
+ * 複数プロセス（Macアプリ / スマホ版 / Porta）から同じファイルを参照しても
+ * 常に最新が反映されるよう、ファイルの mtimeMs + size でキャッシュ鮮度を検証し、
+ * 書き込み時も最新ディスク内容を読み直してからアトミックに保存する。
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -44,6 +48,15 @@ function createEmptyStore(): UserMetaStore {
   };
 }
 
+function cloneStore(store: UserMetaStore): UserMetaStore {
+  return {
+    version: 1,
+    pinnedOverrides: { ...store.pinnedOverrides },
+    projectAssignments: { ...store.projectAssignments },
+    projectSettings: { ...store.projectSettings },
+  };
+}
+
 export function resolveUserMetaFilePath(): string {
   if (process.env.PORTA_USER_META_FILE) {
     return process.env.PORTA_USER_META_FILE;
@@ -55,12 +68,14 @@ export function resolveUserMetaFilePath(): string {
 }
 
 let cachedPath: string | null = null;
+let cachedSig: string | null = null;
 let cachedStore: UserMetaStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
 export function invalidateUserMetaCache(): void {
   cachedStore = null;
   cachedPath = null;
+  cachedSig = null;
 }
 
 function normalizeStore(raw: unknown): UserMetaStore {
@@ -113,56 +128,87 @@ function normalizeStore(raw: unknown): UserMetaStore {
   return base;
 }
 
-export async function getUserMeta(): Promise<UserMetaStore> {
-  const targetPath = resolveUserMetaFilePath();
-  if (cachedStore && cachedPath === targetPath) {
-    return cachedStore;
-  }
+async function readStoreFromDisk(targetPath: string): Promise<{
+  store: UserMetaStore;
+  sig: string | null;
+}> {
   try {
+    const st = await stat(targetPath);
+    const sig = `${st.mtimeMs}:${st.size}`;
+    if (cachedStore && cachedPath === targetPath && cachedSig === sig) {
+      return { store: cloneStore(cachedStore), sig };
+    }
     const raw = await readFile(targetPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    cachedStore = normalizeStore(parsed);
+    const parsed = normalizeStore(JSON.parse(raw));
+    cachedStore = cloneStore(parsed);
+    cachedPath = targetPath;
+    cachedSig = sig;
+    return { store: parsed, sig };
   } catch {
-    cachedStore = createEmptyStore();
+    const empty = createEmptyStore();
+    cachedStore = cloneStore(empty);
+    cachedPath = targetPath;
+    cachedSig = null;
+    return { store: empty, sig: null };
   }
-  cachedPath = targetPath;
-  return cachedStore;
 }
 
-async function persistStore(store: UserMetaStore): Promise<void> {
+export async function getUserMeta(): Promise<UserMetaStore> {
   const targetPath = resolveUserMetaFilePath();
-  cachedStore = store;
-  cachedPath = targetPath;
-  const serialized = `${JSON.stringify(store, null, 2)}\n`;
-  writeQueue = writeQueue
+  const { store } = await readStoreFromDisk(targetPath);
+  return store;
+}
+
+async function mutateStore(
+  mutator: (store: UserMetaStore) => boolean | void,
+): Promise<UserMetaStore> {
+  const targetPath = resolveUserMetaFilePath();
+  let resultStore = createEmptyStore();
+  const job = writeQueue
     .catch(() => {})
     .then(async () => {
+      // 書き込み直前に必ず最新ディスクを読み直して他プロセスの変更を保持する
+      const { store } = await readStoreFromDisk(targetPath);
+      const shouldWrite = mutator(store);
+      resultStore = cloneStore(store);
+      if (shouldWrite === false) return;
+      const serialized = `${JSON.stringify(store, null, 2)}\n`;
       await mkdir(dirname(targetPath), { recursive: true });
       await writeFile(targetPath, serialized, "utf-8");
+      try {
+        const st = await stat(targetPath);
+        cachedSig = `${st.mtimeMs}:${st.size}`;
+      } catch {
+        cachedSig = null;
+      }
+      cachedPath = targetPath;
+      cachedStore = cloneStore(store);
     });
-  await writeQueue;
+  writeQueue = job;
+  await job;
+  return resultStore;
 }
 
 export async function setPinnedOverride(
   conversationId: string,
   pinned: boolean,
 ): Promise<void> {
-  const store = await getUserMeta();
-  store.pinnedOverrides[conversationId] = pinned;
-  await persistStore(store);
+  await mutateStore((store) => {
+    store.pinnedOverrides[conversationId] = pinned;
+  });
 }
 
 export async function setProjectAssignment(
   conversationId: string,
   projectId: string | null,
 ): Promise<void> {
-  const store = await getUserMeta();
-  if (projectId && projectId.trim()) {
-    store.projectAssignments[conversationId] = projectId.trim();
-  } else {
-    delete store.projectAssignments[conversationId];
-  }
-  await persistStore(store);
+  await mutateStore((store) => {
+    if (projectId && projectId.trim()) {
+      store.projectAssignments[conversationId] = projectId.trim();
+    } else {
+      delete store.projectAssignments[conversationId];
+    }
+  });
 }
 
 export async function assignConversationsToProject(
@@ -171,36 +217,34 @@ export async function assignConversationsToProject(
 ): Promise<number> {
   const targetId = projectId.trim();
   if (!targetId || conversationIds.length === 0) return 0;
-  const store = await getUserMeta();
   let updated = 0;
-  for (const rawId of conversationIds) {
-    const convId = typeof rawId === "string" ? rawId.trim() : "";
-    if (!convId) continue;
-    if (store.projectAssignments[convId] !== targetId) {
-      store.projectAssignments[convId] = targetId;
-      updated += 1;
+  await mutateStore((store) => {
+    for (const rawId of conversationIds) {
+      const convId = typeof rawId === "string" ? rawId.trim() : "";
+      if (!convId) continue;
+      if (store.projectAssignments[convId] !== targetId) {
+        store.projectAssignments[convId] = targetId;
+        updated += 1;
+      }
     }
-  }
-  if (updated > 0) {
-    await persistStore(store);
-  }
+    return updated > 0;
+  });
   return updated;
 }
 
 export async function clearProjectAssignmentsForProject(
   projectId: string,
 ): Promise<number> {
-  const store = await getUserMeta();
   let removed = 0;
-  for (const [convId, assignedId] of Object.entries(store.projectAssignments)) {
-    if (assignedId === projectId) {
-      delete store.projectAssignments[convId];
-      removed += 1;
+  await mutateStore((store) => {
+    for (const [convId, assignedId] of Object.entries(store.projectAssignments)) {
+      if (assignedId === projectId) {
+        delete store.projectAssignments[convId];
+        removed += 1;
+      }
     }
-  }
-  if (removed > 0) {
-    await persistStore(store);
-  }
+    return removed > 0;
+  });
   return removed;
 }
 
@@ -212,13 +256,13 @@ export async function getProjectSettings(): Promise<ProjectUserSettings> {
 export async function updateProjectSettings(
   patch: Partial<ProjectUserSettings>,
 ): Promise<ProjectUserSettings> {
-  const store = await getUserMeta();
-  if (typeof patch.defaultProjectFolder === "string") {
-    store.projectSettings.defaultProjectFolder = patch.defaultProjectFolder.trim();
-  }
-  if (typeof patch.createProjectSubfolder === "boolean") {
-    store.projectSettings.createProjectSubfolder = patch.createProjectSubfolder;
-  }
-  await persistStore(store);
-  return { ...store.projectSettings };
+  const updated = await mutateStore((store) => {
+    if (typeof patch.defaultProjectFolder === "string") {
+      store.projectSettings.defaultProjectFolder = patch.defaultProjectFolder.trim();
+    }
+    if (typeof patch.createProjectSubfolder === "boolean") {
+      store.projectSettings.createProjectSubfolder = patch.createProjectSubfolder;
+    }
+  });
+  return { ...updated.projectSettings };
 }

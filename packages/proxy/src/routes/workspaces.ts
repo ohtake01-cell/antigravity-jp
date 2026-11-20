@@ -314,6 +314,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
       const body = (await c.req.json().catch(() => ({}))) as {
         name?: string;
         folderPath?: string;
+        clearFolder?: boolean;
         createFolderIfMissing?: boolean;
         preserveConversationIds?: string[];
       };
@@ -338,8 +339,24 @@ export function registerWorkspaceRoutes(app: Hono): void {
       )?.folderUri;
 
       let nextFolderUri: string | undefined;
-      if (typeof body.folderPath === "string") {
-        const trimmedPath = body.folderPath.trim();
+      if (body.clearFolder === true) {
+        nextFolderUri = undefined;
+      } else if (typeof body.folderPath === "string") {
+        let trimmedPath = body.folderPath.trim();
+        // パス空欄で保存した場合（明示的な解除でない場合）はデフォルトフォルダを自動適用
+        if (!trimmedPath) {
+          const settings = await getProjectSettings();
+          if (settings.defaultProjectFolder) {
+            const baseFolder = resolve(expandHomePath(settings.defaultProjectFolder));
+            if (settings.createProjectSubfolder) {
+              const subPath = join(baseFolder, sanitizeSubfolderName(nextName));
+              await mkdir(subPath, { recursive: true });
+              trimmedPath = subPath;
+            } else {
+              trimmedPath = baseFolder;
+            }
+          }
+        }
         if (trimmedPath) {
           const absPath = resolve(expandHomePath(trimmedPath));
           if (body.createFolderIfMissing === true) {

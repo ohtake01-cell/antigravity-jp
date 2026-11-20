@@ -1165,6 +1165,44 @@ button.sidebar-pin-badge:hover {
   white-space: nowrap;
 }
 
+.sidebar-project-name-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-project-path-sub {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  opacity: 0.78;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.sidebar-toast {
+  margin: 6px 10px 2px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.18);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  flex-shrink: 0;
+}
+
+.sidebar-toast.error {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
 .project-group-header .sidebar-project-row-actions {
   margin-left: auto;
 }
