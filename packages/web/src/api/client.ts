@@ -159,6 +159,22 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  updateProject: (
+    id: string,
+    payload: {
+      name?: string;
+      folderPath?: string;
+      createFolderIfMissing?: boolean;
+    },
+  ) =>
+    request<{ ok: boolean; project: import("../types").ProjectEntry }>(
+      `/api/projects/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+
   deleteProject: (id: string) =>
     request<{ ok: boolean; id: string }>(
       `/api/projects/${encodeURIComponent(id)}`,

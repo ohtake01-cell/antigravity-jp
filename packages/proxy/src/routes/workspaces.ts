@@ -296,6 +296,87 @@ export function registerWorkspaceRoutes(app: Hono): void {
     }
   });
 
+  app.patch("/api/projects/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!id || !/^[a-zA-Z0-9_-]+$/.test(id) || id === "default-cli-project") {
+      return c.json({ error: "このプロジェクトは編集できません" }, 400);
+    }
+    try {
+      const targetPath = join(resolveGeminiBaseDir(), "config", "projects", `${id}.json`);
+      let existing: Record<string, unknown>;
+      try {
+        existing = JSON.parse(await readFile(targetPath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        return c.json({ error: "プロジェクトが見つかりません" }, 404);
+      }
+
+      const body = (await c.req.json().catch(() => ({}))) as {
+        name?: string;
+        folderPath?: string;
+        createFolderIfMissing?: boolean;
+      };
+
+      const nextName =
+        typeof body.name === "string"
+          ? body.name.trim()
+          : typeof existing.name === "string"
+            ? existing.name.trim()
+            : "";
+      if (!nextName) {
+        return c.json({ error: "プロジェクト名を入力してください" }, 400);
+      }
+
+      let nextFolderUri: string | undefined;
+      if (typeof body.folderPath === "string") {
+        const trimmedPath = body.folderPath.trim();
+        if (trimmedPath) {
+          const absPath = resolve(expandHomePath(trimmedPath));
+          if (body.createFolderIfMissing === true) {
+            await mkdir(absPath, { recursive: true });
+          }
+          nextFolderUri = localPathToFileUri(absPath);
+        } else {
+          nextFolderUri = undefined;
+        }
+      } else {
+        const existingResources = (
+          existing.projectResources as
+            | { resources?: Array<{ folderUri?: string }> }
+            | undefined
+        )?.resources;
+        nextFolderUri = existingResources?.find(
+          (r) => typeof r?.folderUri === "string" && r.folderUri.length > 0,
+        )?.folderUri;
+      }
+
+      const updatedPayload = {
+        ...existing,
+        id,
+        name: nextName,
+        projectResources: nextFolderUri
+          ? { resources: [{ folderUri: nextFolderUri }] }
+          : {},
+      };
+      await writeFile(
+        targetPath,
+        `${JSON.stringify(updatedPayload, null, 2)}\n`,
+        "utf-8",
+      );
+      invalidateProjectMapsCache();
+
+      const project: RegisteredProject = {
+        id,
+        name: nextName,
+        ...(nextFolderUri
+          ? { folderUri: nextFolderUri, folderPath: fileUriToLocalPath(nextFolderUri) }
+          : {}),
+      };
+      return c.json({ ok: true, project });
+    } catch (err) {
+      return handleRPCError(c, err);
+    }
+  });
+
   app.delete("/api/projects/:id", async (c) => {
     const id = c.req.param("id");
     if (!id || !/^[a-zA-Z0-9_-]+$/.test(id) || id === "default-cli-project") {

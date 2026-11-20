@@ -515,6 +515,12 @@ export function Sidebar({
   const [newProjectFolder, setNewProjectFolder] = useState("");
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState("");
+  const [editProjectFolder, setEditProjectFolder] = useState("");
+  const [editCreateFolder, setEditCreateFolder] = useState(false);
+  const [editProjectSaving, setEditProjectSaving] = useState(false);
+  const [editProjectError, setEditProjectError] = useState<string | null>(null);
   const projectLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -599,6 +605,56 @@ export function Sidebar({
     [newProjectFolder, newProjectName, projectSaving],
   );
 
+  const handleStartEditProject = useCallback((proj: ProjectEntry) => {
+    setEditingProjectId(proj.id);
+    setEditProjectName(proj.name);
+    setEditProjectFolder(proj.folderPath ?? "");
+    setEditCreateFolder(false);
+    setEditProjectError(null);
+    setProjectMenuId(null);
+  }, []);
+
+  const handleSaveEditProject = useCallback(
+    async (e: React.FormEvent, projId: string) => {
+      e.preventDefault();
+      if (editProjectSaving) return;
+      const trimmedName = editProjectName.trim();
+      if (!trimmedName) {
+        setEditProjectError("プロジェクト名を入力してください");
+        return;
+      }
+      setEditProjectSaving(true);
+      setEditProjectError(null);
+      try {
+        const res = await api.updateProject(projId, {
+          name: trimmedName,
+          folderPath: editProjectFolder.trim(),
+          createFolderIfMissing: editCreateFolder,
+        });
+        if (res?.project) {
+          setProjects((prev) =>
+            prev.map((p) => (p.id === projId ? res.project : p)),
+          );
+          setEditingProjectId(null);
+          onRefresh?.();
+        }
+      } catch (err) {
+        setEditProjectError(
+          err instanceof Error ? err.message : "プロジェクトの更新に失敗しました",
+        );
+      } finally {
+        setEditProjectSaving(false);
+      }
+    },
+    [
+      editProjectSaving,
+      editProjectName,
+      editProjectFolder,
+      editCreateFolder,
+      onRefresh,
+    ],
+  );
+
   const handleDeleteProject = useCallback(
     async (proj: ProjectEntry) => {
       const confirmed =
@@ -658,9 +714,9 @@ export function Sidebar({
     async (conv: ConversationEntry, projectId: string | null) => {
       setLocalProjectOverrides((prev) => ({ ...prev, [conv.id]: projectId }));
       if (projectId) {
-        setCollapsed((prev) =>
-          prev[`proj:${projectId}`] ? { ...prev, [`proj:${projectId}`]: false } : prev,
-        );
+        const key = `proj:${projectId}`;
+        setCollapsed((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
+        setExpanded((prev) => ({ ...prev, [key]: true }));
       }
       try {
         await api.assignConversationProject(conv.id, projectId);
@@ -929,29 +985,28 @@ export function Sidebar({
         if (!badge || badge.provider !== providerFilter) continue;
       }
 
-      if (isConvRunning(conv)) {
-        runningList.push(conv);
-        continue;
-      }
-
+      const isRunning = isConvRunning(conv);
       const isPinned =
         localPinnedOverrides[conv.id] ??
         conv.summary.annotations?.pinned === true;
 
-      if (isPinned) {
+      if (isRunning) {
+        runningList.push(conv);
+      } else if (isPinned) {
         pinnedList.push(conv);
-      } else {
-        const matchedProj = matchConversationProject(conv);
-        if (matchedProj) {
-          const list = projectMap.get(matchedProj.id) ?? [];
-          list.push(conv);
-          projectMap.set(matchedProj.id, list);
-        } else {
-          const name = extractWorkspaceName(conv);
-          const list = workspaceMap.get(name) ?? [];
-          list.push(conv);
-          workspaceMap.set(name, list);
-        }
+      }
+
+      // プロジェクトに所属するチャットは実行中・ピン留め中でも必ずプロジェクト配下に表示する
+      const matchedProj = matchConversationProject(conv);
+      if (matchedProj) {
+        const list = projectMap.get(matchedProj.id) ?? [];
+        list.push(conv);
+        projectMap.set(matchedProj.id, list);
+      } else if (!isRunning && !isPinned) {
+        const name = extractWorkspaceName(conv);
+        const list = workspaceMap.get(name) ?? [];
+        list.push(conv);
+        workspaceMap.set(name, list);
       }
     }
 
@@ -1170,7 +1225,8 @@ export function Sidebar({
     if (activeId) markSeen(activeId);
   }, [activeId, conversations, markSeen]);
 
-  const renderItem = (conv: ConversationEntry) => {
+  const renderItem = (conv: ConversationEntry, sectionKey = "main") => {
+    const itemKey = `${sectionKey}:${conv.id}`;
     const isActive = conv.id === activeId;
     const isRunning = isConvRunning(conv);
     const hasRunningSubagent = conv.summary.hasRunningSubagent === true;
@@ -1210,9 +1266,9 @@ export function Sidebar({
         new Date(lastSeen).getTime();
 
     return (
-      <div key={conv.id} className="sidebar-item-group">
+      <div key={itemKey} className="sidebar-item-group">
       <div
-        className={`sidebar-item ${isActive ? "active" : ""} ${isRunning ? "running" : ""} ${isRunning && isActive ? "active-running" : ""} ${isUnloaded(conv) ? "dimmed" : ""} ${menuOpen === conv.id ? "menu-open" : ""}`}
+        className={`sidebar-item ${isActive ? "active" : ""} ${isRunning ? "running" : ""} ${isRunning && isActive ? "active-running" : ""} ${isUnloaded(conv) ? "dimmed" : ""} ${menuOpen === itemKey ? "menu-open" : ""}`}
         onTouchStart={(e) => {
           if (isRenaming) return;
           const touch = e.touches[0];
@@ -1225,7 +1281,7 @@ export function Sidebar({
             if (typeof navigator !== "undefined" && navigator.vibrate) {
               navigator.vibrate(20);
             }
-            setMenuOpen(conv.id);
+            setMenuOpen(itemKey);
           }, 450);
         }}
         onTouchMove={(e) => {
@@ -1255,7 +1311,7 @@ export function Sidebar({
           if (isRenaming) return;
           e.preventDefault();
           e.stopPropagation();
-          setMenuOpen(conv.id);
+          setMenuOpen(itemKey);
         }}
         onClick={(e) => {
           if (isRenaming) return;
@@ -1468,13 +1524,13 @@ export function Sidebar({
               className="sidebar-item-menu-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuOpen(menuOpen === conv.id ? null : conv.id);
+                setMenuOpen(menuOpen === itemKey ? null : itemKey);
               }}
               title="メニュー"
             >
               <IconMore size={14} />
             </button>
-            {menuOpen === conv.id && (
+            {menuOpen === itemKey && (
               <ContextMenu
                 title={displayTitle}
                 isPinned={isPinned}
@@ -1773,7 +1829,12 @@ export function Sidebar({
 
                     {!isGroupCollapsed && (
                       <div className="workspace-group-items">
-                        {group.conversations.map(renderItem)}
+                        {group.conversations.map((c) =>
+                          renderItem(
+                            c,
+                            group.isRunningSection ? "running" : "pinned",
+                          ),
+                        )}
                       </div>
                     )}
                   </div>
@@ -2008,6 +2069,16 @@ export function Sidebar({
                                 >
                                   ＋ 新規チャットを作成
                                 </button>
+                                {!proj.isDefaultCli && (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="sidebar-project-dropdown-item"
+                                    onClick={() => handleStartEditProject(proj)}
+                                  >
+                                    ✏️ 名前・パスを編集
+                                  </button>
+                                )}
                                 {proj.folderPath && (
                                   <button
                                     type="button"
@@ -2074,6 +2145,77 @@ export function Sidebar({
                       </button>
                     )}
 
+                    {proj && editingProjectId === proj.id && (
+                      <form
+                        className="sidebar-project-add-form"
+                        style={{ margin: "4px 4px 6px" }}
+                        onSubmit={(e) => void handleSaveEditProject(e, proj.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="text"
+                          className="sidebar-project-input"
+                          placeholder="プロジェクト名"
+                          aria-label="プロジェクト名を編集"
+                          value={editProjectName}
+                          onChange={(e) => setEditProjectName(e.target.value)}
+                          disabled={editProjectSaving}
+                        />
+                        <input
+                          type="text"
+                          className="sidebar-project-input"
+                          placeholder="フォルダパス（空欄でフォルダ紐づけ解除）"
+                          aria-label="フォルダパスを編集"
+                          value={editProjectFolder}
+                          onChange={(e) => setEditProjectFolder(e.target.value)}
+                          disabled={editProjectSaving}
+                        />
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            fontSize: "11px",
+                            color: "var(--text-secondary)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editCreateFolder}
+                            onChange={(e) => setEditCreateFolder(e.target.checked)}
+                            disabled={editProjectSaving}
+                          />
+                          <span>フォルダが無い場合は自動作成する</span>
+                        </label>
+                        {editProjectError && (
+                          <div className="sidebar-project-error">
+                            {editProjectError}
+                          </div>
+                        )}
+                        <div className="sidebar-project-form-btns">
+                          <button
+                            type="submit"
+                            className="sidebar-project-submit-btn"
+                            disabled={editProjectSaving}
+                          >
+                            {editProjectSaving ? "保存中…" : "保存"}
+                          </button>
+                          <button
+                            type="button"
+                            className="sidebar-project-cancel-btn"
+                            onClick={() => {
+                              setEditingProjectId(null);
+                              setEditProjectError(null);
+                            }}
+                          >
+                            キャンセル
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
                     {!isGroupCollapsed && (
                       <div className="workspace-group-items">
                         {proj && totalCount === 0 ? (
@@ -2081,7 +2223,7 @@ export function Sidebar({
                             まだ会話はありません
                           </div>
                         ) : (
-                          visibleItems.map(renderItem)
+                          visibleItems.map((c) => renderItem(c, groupKey))
                         )}
 
                         {hiddenCount > 0 && (
