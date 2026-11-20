@@ -53,6 +53,7 @@ import {
   saveManualTitleLock,
 } from "../title-formatter.js";
 import {
+  UNASSIGNED_PROJECT_ID,
   getUserMeta,
   setPinnedOverride,
   setProjectAssignment,
@@ -634,15 +635,22 @@ export function registerConversationRoutes(app: Hono): void {
                 continue;
               }
               const assignedProjectId = userMeta.projectAssignments[id];
+              const isExplicitlyUnassigned =
+                assignedProjectId === UNASSIGNED_PROJECT_ID;
               const validAssignedProjectId =
-                assignedProjectId && projectNameMap.has(assignedProjectId)
+                !isExplicitlyUnassigned &&
+                assignedProjectId &&
+                projectNameMap.has(assignedProjectId)
                   ? assignedProjectId
                   : undefined;
-              const effectiveProjectId =
-                validAssignedProjectId ||
-                projectId ||
-                (wsUri ? wsToProjectMap.get(wsUri.replace(/\/+$/, "")) : undefined);
-              if (validAssignedProjectId) {
+              const effectiveProjectId = isExplicitlyUnassigned
+                ? undefined
+                : validAssignedProjectId ||
+                  projectId ||
+                  (wsUri ? wsToProjectMap.get(wsUri.replace(/\/+$/, "")) : undefined);
+              if (isExplicitlyUnassigned) {
+                (normalizedSummary as any).assignedProjectId = UNASSIGNED_PROJECT_ID;
+              } else if (validAssignedProjectId) {
                 (normalizedSummary as any).assignedProjectId = validAssignedProjectId;
               }
               if (effectiveProjectId) {
@@ -803,17 +811,22 @@ export function registerConversationRoutes(app: Hono): void {
             }
 
             const assignedDiskProjectId = userMeta.projectAssignments[diskId.id];
+            const isExplicitlyUnassignedDisk =
+              assignedDiskProjectId === UNASSIGNED_PROJECT_ID;
             const validAssignedDiskProjectId =
-              assignedDiskProjectId && projectNameMap.has(assignedDiskProjectId)
+              !isExplicitlyUnassignedDisk &&
+              assignedDiskProjectId &&
+              projectNameMap.has(assignedDiskProjectId)
                 ? assignedDiskProjectId
                 : undefined;
-            const resolvedDiskProjectId =
-              validAssignedDiskProjectId ||
-              (injectedWorkspaces[0]?.workspaceFolderAbsoluteUri
-                ? wsToProjectMap.get(
-                    injectedWorkspaces[0].workspaceFolderAbsoluteUri.replace(/\/+$/, ""),
-                  )
-                : undefined);
+            const resolvedDiskProjectId = isExplicitlyUnassignedDisk
+              ? undefined
+              : validAssignedDiskProjectId ||
+                (injectedWorkspaces[0]?.workspaceFolderAbsoluteUri
+                  ? wsToProjectMap.get(
+                      injectedWorkspaces[0].workspaceFolderAbsoluteUri.replace(/\/+$/, ""),
+                    )
+                  : undefined);
             const resolvedDiskProjectName = resolvedDiskProjectId
               ? projectNameMap.get(resolvedDiskProjectId)
               : undefined;
@@ -841,9 +854,11 @@ export function registerConversationRoutes(app: Hono): void {
                 createdTime: diskId.mtime,
                 trajectoryId: "",
                 workspaces: injectedWorkspaces,
-                ...(validAssignedDiskProjectId
-                  ? { assignedProjectId: validAssignedDiskProjectId }
-                  : {}),
+                ...(isExplicitlyUnassignedDisk
+                  ? { assignedProjectId: UNASSIGNED_PROJECT_ID }
+                  : validAssignedDiskProjectId
+                    ? { assignedProjectId: validAssignedDiskProjectId }
+                    : {}),
                 ...(resolvedDiskProjectName ? { projectName: resolvedDiskProjectName } : {}),
                 ...(effectiveDiskPinned !== undefined
                   ? { annotations: { pinned: effectiveDiskPinned } }
@@ -2068,7 +2083,7 @@ export function registerConversationRoutes(app: Hono): void {
 
   app.patch("/api/conversations/:id/project", async (c) => {
     const id = c.req.param("id");
-    let body: { projectId?: string | null };
+    let body: { projectId?: string | null; forceUnassign?: boolean };
     try {
       body = await c.req.json();
     } catch {
@@ -2077,10 +2092,14 @@ export function registerConversationRoutes(app: Hono): void {
 
     const rawProjectId =
       typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!rawProjectId) {
-      await setProjectAssignment(id, null);
+    if (!rawProjectId || rawProjectId === UNASSIGNED_PROJECT_ID) {
+      const nextVal =
+        body.forceUnassign === true || rawProjectId === UNASSIGNED_PROJECT_ID
+          ? UNASSIGNED_PROJECT_ID
+          : null;
+      await setProjectAssignment(id, nextVal);
       conversationSignals.emit("activate", id);
-      return c.json({ ok: true, id, projectId: null, projectName: null });
+      return c.json({ ok: true, id, projectId: nextVal, projectName: null });
     }
 
     const projectNameMap = await getProjectNameMap();

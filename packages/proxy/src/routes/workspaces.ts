@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { Hono } from "hono";
@@ -16,6 +16,7 @@ import {
   resolveGeminiBaseDir,
 } from "../metadata.js";
 import {
+  assignConversationsToProject,
   clearProjectAssignmentsForProject,
   getProjectSettings,
   updateProjectSettings,
@@ -314,6 +315,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
         name?: string;
         folderPath?: string;
         createFolderIfMissing?: boolean;
+        preserveConversationIds?: string[];
       };
 
       const nextName =
@@ -326,6 +328,15 @@ export function registerWorkspaceRoutes(app: Hono): void {
         return c.json({ error: "プロジェクト名を入力してください" }, 400);
       }
 
+      const existingResources = (
+        existing.projectResources as
+          | { resources?: Array<{ folderUri?: string }> }
+          | undefined
+      )?.resources;
+      const oldFolderUri = existingResources?.find(
+        (r) => typeof r?.folderUri === "string" && r.folderUri.length > 0,
+      )?.folderUri;
+
       let nextFolderUri: string | undefined;
       if (typeof body.folderPath === "string") {
         const trimmedPath = body.folderPath.trim();
@@ -333,20 +344,31 @@ export function registerWorkspaceRoutes(app: Hono): void {
           const absPath = resolve(expandHomePath(trimmedPath));
           if (body.createFolderIfMissing === true) {
             await mkdir(absPath, { recursive: true });
+          } else {
+            try {
+              const st = await stat(absPath);
+              if (!st.isDirectory()) {
+                return c.json(
+                  { error: "指定されたパスはフォルダではなくファイルです" },
+                  400,
+                );
+              }
+            } catch {
+              return c.json(
+                {
+                  error:
+                    "指定されたフォルダが見つかりません。「フォルダが無い場合は自動作成する」にチェックを入れるか、実在するパスを指定してください",
+                },
+                400,
+              );
+            }
           }
           nextFolderUri = localPathToFileUri(absPath);
         } else {
           nextFolderUri = undefined;
         }
       } else {
-        const existingResources = (
-          existing.projectResources as
-            | { resources?: Array<{ folderUri?: string }> }
-            | undefined
-        )?.resources;
-        nextFolderUri = existingResources?.find(
-          (r) => typeof r?.folderUri === "string" && r.folderUri.length > 0,
-        )?.folderUri;
+        nextFolderUri = oldFolderUri;
       }
 
       const updatedPayload = {
@@ -363,6 +385,18 @@ export function registerWorkspaceRoutes(app: Hono): void {
         "utf-8",
       );
       invalidateProjectMapsCache();
+
+      // パス変更時に元々このプロジェクトに表示されていたチャットが外へ飛び散らないようID固定する
+      const folderChanged =
+        (oldFolderUri?.replace(/\/+$/, "") ?? "") !==
+        (nextFolderUri?.replace(/\/+$/, "") ?? "");
+      if (
+        folderChanged &&
+        Array.isArray(body.preserveConversationIds) &&
+        body.preserveConversationIds.length > 0
+      ) {
+        await assignConversationsToProject(body.preserveConversationIds, id);
+      }
 
       const project: RegisteredProject = {
         id,

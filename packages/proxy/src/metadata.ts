@@ -621,7 +621,8 @@ async function loadProjectMaps(): Promise<{
 
   const projectNameMap = new Map<string, string>();
   const wsToProjectMap = new Map<string, string>();
-  const projectsDir = join(homedir(), ".gemini", "config", "projects");
+  const uriCandidates = new Map<string, Array<{ id: string; name: string }>>();
+  const projectsDir = join(resolveGeminiBaseDir(), "config", "projects");
   try {
     const files = (await readdir(projectsDir)).filter((f) => f.endsWith(".json"));
     const contents = await Promise.all(
@@ -637,19 +638,38 @@ async function loadProjectMaps(): Promise<{
       if (!content) continue;
       try {
         const data = JSON.parse(content);
-        if (data.id && data.name) {
-          projectNameMap.set(data.id, safeDecodeUriComponent(data.name));
+        if (data.sidecar) continue;
+        const decodedName =
+          data.id && data.name ? safeDecodeUriComponent(data.name) : "";
+        if (data.id && decodedName) {
+          projectNameMap.set(data.id, decodedName);
         }
         const resources = data?.projectResources?.resources;
         if (data.id && Array.isArray(resources)) {
           for (const res of resources) {
-            if (typeof res?.folderUri === "string") {
-              wsToProjectMap.set(res.folderUri.replace(/\/+$/, ""), data.id);
+            if (typeof res?.folderUri === "string" && res.folderUri.trim()) {
+              const normUri = res.folderUri.replace(/\/+$/, "");
+              const list = uriCandidates.get(normUri) ?? [];
+              list.push({ id: data.id, name: decodedName });
+              uriCandidates.set(normUri, list);
             }
           }
         }
       } catch {
         // ignore invalid json
+      }
+    }
+
+    // 同じフォルダパスを共有するプロジェクトが複数ある場合は曖昧な吸い寄せを防ぐ
+    for (const [normUri, list] of uriCandidates.entries()) {
+      if (list.length === 1) {
+        wsToProjectMap.set(normUri, list[0].id);
+      } else if (list.length > 1) {
+        const uriBase = safeDecodeUriComponent(normUri.split("/").pop() ?? "");
+        const exactMatches = list.filter((item) => item.name === uriBase);
+        if (exactMatches.length === 1) {
+          wsToProjectMap.set(normUri, exactMatches[0].id);
+        }
       }
     }
   } catch {

@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  UNASSIGNED_PROJECT_ID,
+  assignConversationsToProject,
   clearProjectAssignmentsForProject,
   getProjectSettings,
   getUserMeta,
@@ -101,5 +103,20 @@ describe("user-meta store & project helpers", () => {
       join(homedir(), "Projects/demo"),
     );
     expect(expandHomePath("/tmp/work")).toBe("/tmp/work");
+  });
+
+  it("supports explicit UNASSIGNED_PROJECT_ID and batch-preserving chats on project path edits", async () => {
+    await setProjectAssignment("conv-x", UNASSIGNED_PROJECT_ID);
+    const updatedCount = await assignConversationsToProject(
+      ["conv-1", "conv-2"],
+      "proj-renamed",
+    );
+    expect(updatedCount).toBe(2);
+
+    invalidateUserMetaCache();
+    const meta = await getUserMeta();
+    expect(meta.projectAssignments["conv-x"]).toBe(UNASSIGNED_PROJECT_ID);
+    expect(meta.projectAssignments["conv-1"]).toBe("proj-renamed");
+    expect(meta.projectAssignments["conv-2"]).toBe("proj-renamed");
   });
 });

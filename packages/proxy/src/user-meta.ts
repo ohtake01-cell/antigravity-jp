@@ -20,6 +20,9 @@ export interface ProjectUserSettings {
   createProjectSubfolder: boolean;
 }
 
+/** プロジェクトから明示的に外されたことを示すセンチネルID（自動マッチ復活を防止） */
+export const UNASSIGNED_PROJECT_ID = "__unassigned__";
+
 export interface UserMetaStore {
   version: 1;
   pinnedOverrides: Record<string, boolean>;
@@ -160,6 +163,28 @@ export async function setProjectAssignment(
     delete store.projectAssignments[conversationId];
   }
   await persistStore(store);
+}
+
+export async function assignConversationsToProject(
+  conversationIds: string[],
+  projectId: string,
+): Promise<number> {
+  const targetId = projectId.trim();
+  if (!targetId || conversationIds.length === 0) return 0;
+  const store = await getUserMeta();
+  let updated = 0;
+  for (const rawId of conversationIds) {
+    const convId = typeof rawId === "string" ? rawId.trim() : "";
+    if (!convId) continue;
+    if (store.projectAssignments[convId] !== targetId) {
+      store.projectAssignments[convId] = targetId;
+      updated += 1;
+    }
+  }
+  if (updated > 0) {
+    await persistStore(store);
+  }
+  return updated;
 }
 
 export async function clearProjectAssignmentsForProject(

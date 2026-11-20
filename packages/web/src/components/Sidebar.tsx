@@ -48,6 +48,7 @@ interface WorkspaceGroup {
 }
 
 const PREVIEW_COUNT = 10;
+const UNASSIGNED_PROJECT_ID = "__unassigned__";
 
 function parseSafeTime(iso?: string): number {
   if (!iso) return 0;
@@ -615,7 +616,11 @@ export function Sidebar({
   }, []);
 
   const handleSaveEditProject = useCallback(
-    async (e: React.FormEvent, projId: string) => {
+    async (
+      e: React.FormEvent,
+      projId: string,
+      preserveConversationIds: string[] = [],
+    ) => {
       e.preventDefault();
       if (editProjectSaving) return;
       const trimmedName = editProjectName.trim();
@@ -630,6 +635,7 @@ export function Sidebar({
           name: trimmedName,
           folderPath: editProjectFolder.trim(),
           createFolderIfMissing: editCreateFolder,
+          preserveConversationIds,
         });
         if (res?.project) {
           setProjects((prev) =>
@@ -712,14 +718,19 @@ export function Sidebar({
 
   const handleAssignProject = useCallback(
     async (conv: ConversationEntry, projectId: string | null) => {
-      setLocalProjectOverrides((prev) => ({ ...prev, [conv.id]: projectId }));
+      const nextOverride = projectId ?? UNASSIGNED_PROJECT_ID;
+      setLocalProjectOverrides((prev) => ({ ...prev, [conv.id]: nextOverride }));
       if (projectId) {
         const key = `proj:${projectId}`;
         setCollapsed((prev) => (prev[key] ? { ...prev, [key]: false } : prev));
         setExpanded((prev) => ({ ...prev, [key]: true }));
       }
       try {
-        await api.assignConversationProject(conv.id, projectId);
+        if (projectId) {
+          await api.assignConversationProject(conv.id, projectId);
+        } else {
+          await api.assignConversationProject(conv.id, null, true);
+        }
         onRefresh?.();
       } catch (err) {
         console.error("Failed to assign project:", err);
@@ -738,10 +749,13 @@ export function Sidebar({
       if (projects.length === 0) return undefined;
       if (Object.prototype.hasOwnProperty.call(localProjectOverrides, conv.id)) {
         const overrideId = localProjectOverrides[conv.id];
+        if (overrideId === UNASSIGNED_PROJECT_ID) return undefined;
         if (overrideId) {
           const byOverride = projects.find((p) => p.id === overrideId);
           if (byOverride) return byOverride;
         }
+      } else if (conv.summary.assignedProjectId === UNASSIGNED_PROJECT_ID) {
+        return undefined;
       } else if (conv.summary.assignedProjectId) {
         const byAssigned = projects.find(
           (p) => p.id === conv.summary.assignedProjectId,
@@ -758,13 +772,21 @@ export function Sidebar({
         "",
       );
       if (wsUri) {
-        const byUri = projects.find(
+        const uriMatches = projects.filter(
           (p) => p.folderUri && p.folderUri.replace(/\/+$/, "") === wsUri,
         );
-        if (byUri) return byUri;
+        if (uriMatches.length === 1) return uriMatches[0];
+        if (uriMatches.length > 1) {
+          // 同じフォルダパスを共有するプロジェクトが複数ある場合はフォルダ名一致のみ自動分類（誤吸い寄せ防止）
+          const uriBase = decodeURIComponent(wsUri.split("/").pop() ?? "");
+          const exact = uriMatches.filter((p) => p.name === uriBase);
+          if (exact.length === 1) return exact[0];
+          return undefined;
+        }
       }
       const wsName = extractWorkspaceName(conv);
-      return projects.find((p) => p.name === wsName);
+      const nameMatches = projects.filter((p) => p.name === wsName);
+      return nameMatches.length === 1 ? nameMatches[0] : undefined;
     },
     [projects, localProjectOverrides],
   );
@@ -1243,13 +1265,12 @@ export function Sidebar({
       (localTitleOverrides[conv.id] ?? conv.summary.summary)?.trim() ||
       "新しいチャット";
     const matchedProject = matchConversationProject(conv);
-    const hasManualProject = Object.prototype.hasOwnProperty.call(
-      localProjectOverrides,
-      conv.id,
-    )
-      ? Boolean(localProjectOverrides[conv.id])
-      : Boolean(conv.summary.assignedProjectId);
-    const displayProjectName = matchedProject?.name ?? conv.summary.projectName;
+    const hasManualProject = Boolean(matchedProject);
+    const displayProjectName =
+      localProjectOverrides[conv.id] === UNASSIGNED_PROJECT_ID ||
+      conv.summary.assignedProjectId === UNASSIGNED_PROJECT_ID
+        ? undefined
+        : matchedProject?.name ?? conv.summary.projectName;
     const isPinned =
       localPinnedOverrides[conv.id] ??
       conv.summary.annotations?.pinned === true;
@@ -2149,7 +2170,13 @@ export function Sidebar({
                       <form
                         className="sidebar-project-add-form"
                         style={{ margin: "4px 4px 6px" }}
-                        onSubmit={(e) => void handleSaveEditProject(e, proj.id)}
+                        onSubmit={(e) =>
+                          void handleSaveEditProject(
+                            e,
+                            proj.id,
+                            group.conversations.map((c) => c.id),
+                          )
+                        }
                         onClick={(e) => e.stopPropagation()}
                         onTouchStart={(e) => e.stopPropagation()}
                       >

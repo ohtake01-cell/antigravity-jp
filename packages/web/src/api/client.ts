@@ -165,6 +165,7 @@ export const api = {
       name?: string;
       folderPath?: string;
       createFolderIfMissing?: boolean;
+      preserveConversationIds?: string[];
     },
   ) =>
     request<{ ok: boolean; project: import("../types").ProjectEntry }>(
@@ -181,7 +182,11 @@ export const api = {
       { method: "DELETE" },
     ),
 
-  assignConversationProject: (cascadeId: string, projectId: string | null) =>
+  assignConversationProject: (
+    cascadeId: string,
+    projectId: string | null,
+    forceUnassign = false,
+  ) =>
     request<{
       ok: boolean;
       id: string;
@@ -189,7 +194,10 @@ export const api = {
       projectName: string | null;
     }>(`/api/conversations/${encodeURIComponent(cascadeId)}/project`, {
       method: "PATCH",
-      body: JSON.stringify({ projectId }),
+      body: JSON.stringify({
+        projectId,
+        ...(forceUnassign ? { forceUnassign: true } : {}),
+      }),
     }),
 
   startConversation: (
