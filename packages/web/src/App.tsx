@@ -12,6 +12,7 @@ import { ChatHeader } from "./components/ChatHeader";
 import { ChatPanel } from "./components/ChatPanel";
 import { ChatInput } from "./components/ChatInput";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { MultiAIPanel } from "./components/MultiAIPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { ArtifactWorkbench } from "./components/ArtifactWorkbench";
 import { AgentMonitorPanel } from "./components/AgentMonitorPanel";
@@ -28,8 +29,10 @@ import { isUnconfirmedOptimisticMessage } from "./utils/optimisticMessages";
 import type { NativeNotificationDeepLink } from "./utils/browserNotifications";
 import type {
   AskQuestionEntry,
+  ExternalProviderId,
   HealthResponse,
   MediaAttachment,
+  ProviderId,
 } from "./types";
 import type { PlannerType } from "./components/ChatInput";
 
@@ -40,6 +43,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/:projectSlug/settings" element={<ChatView />} />
+      <Route path="/:projectSlug/multi-ai" element={<ChatView />} />
       <Route path="/:projectSlug" element={<ChatView />} />
       <Route path="/:projectSlug/:chatId" element={<ChatView />} />
     </Routes>
@@ -115,6 +119,7 @@ function ChatView() {
   const navigate = useNavigate();
   const location = useLocation();
   const isSettingsPage = location.pathname.endsWith("/settings");
+  const isMultiAIPage = location.pathname.endsWith("/multi-ai");
   const activeId = chatId ?? null;
   const lastChatPathRef = useRef<string | null>(
     (() => {
@@ -147,6 +152,8 @@ function ChatView() {
   );
   const { draftText, handleDraftChange } = useDraftText(activeId);
   const { settings, updateSettings } = useClientSettings();
+  const appTier = settings.appTier ?? "lite";
+  const isProTier = appTier === "pro";
 
   // Command Palette (⌘K)
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -156,13 +163,19 @@ function ChatView() {
   const [workbenchFileRef, setWorkbenchFileRef] = useState<string | null>(null);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
 
-  // Quick Side Chat popover (Gemini-only branching from sidebar menu or ⌘K)
+  // Multi-AI active session handoff (when branching or quick-dispatching in Pro mode)
+  const [multiAISessionId, setMultiAISessionId] = useState<string | null>(null);
+
+  // Quick Side Chat popover (Gemini-only in Lite mode; Multi-AI selector in Pro mode)
   const [sideChatOpen, setSideChatOpen] = useState(false);
   const [sideChatTarget, setSideChatTarget] = useState<{
     id: string;
     title: string;
     workspaceUri?: string;
   } | null>(null);
+  const [sideChatProvider, setSideChatProvider] = useState<
+    "antigravity" | ExternalProviderId
+  >("antigravity");
   const [sideChatPrompt, setSideChatPrompt] = useState("");
   const [sideChatBusy, setSideChatBusy] = useState(false);
 
@@ -197,9 +210,9 @@ function ChatView() {
     };
   }, []);
 
-  // Remember the last chat route so toggling back from Settings restores exact chat
+  // Remember the last chat route so toggling back from Settings / Multi-AI restores exact chat
   useEffect(() => {
-    if (!isSettingsPage && location.pathname !== "/") {
+    if (!isSettingsPage && !isMultiAIPage && location.pathname !== "/") {
       lastChatPathRef.current = location.pathname;
       try {
         sessionStorage.setItem(LAST_CHAT_PATH_KEY, location.pathname);
@@ -207,7 +220,14 @@ function ChatView() {
         // Ignore restricted storage
       }
     }
-  }, [isSettingsPage, location.pathname]);
+  }, [isMultiAIPage, isSettingsPage, location.pathname]);
+
+  // Redirect away from /multi-ai if user switches back to Lite tier
+  useEffect(() => {
+    if (isMultiAIPage && !isProTier) {
+      navigate(`/${projectSlug ?? "unknown"}`, { replace: true });
+    }
+  }, [isMultiAIPage, isProTier, navigate, projectSlug]);
 
   // Keep browser favicon synced
   useEffect(() => {
@@ -455,6 +475,17 @@ function ChatView() {
     if (isMobile()) setSidebarOpen(false);
   }, [navigate, projectSlug]);
 
+  const handleOpenMultiAI = useCallback(
+    (sessionId?: string | null) => {
+      if (sessionId !== undefined) {
+        setMultiAISessionId(sessionId);
+      }
+      navigate(`/${projectSlug ?? "unknown"}/multi-ai`);
+      if (isMobile()) setSidebarOpen(false);
+    },
+    [navigate, projectSlug],
+  );
+
   useEffect(() => {
     const onOpenPalette = () => setPaletteOpen(true);
     const onNativeNewChat = () => handleNew();
@@ -507,7 +538,7 @@ function ChatView() {
 
   const handleBackToChat = useCallback(() => {
     const saved = lastChatPathRef.current;
-    if (saved && !saved.endsWith("/settings")) {
+    if (saved && !saved.endsWith("/settings") && !saved.endsWith("/multi-ai")) {
       navigate(saved);
     } else {
       navigate(`/${projectSlug ?? "unknown"}`);
@@ -555,12 +586,14 @@ function ChatView() {
   // Header info
   const headerTitle = isSettingsPage
     ? "設定"
-    : activeId
-      ? (activeConv?.summary.summary ??
-        (activeSubagentMatch
-          ? `🤖 ${activeSubagentMatch.child.role}`
-          : "チャット"))
-      : "新しいチャット";
+    : isMultiAIPage && isProTier
+      ? "⚡ マルチAI"
+      : activeId
+        ? (activeConv?.summary.summary ??
+          (activeSubagentMatch
+            ? `🤖 ${activeSubagentMatch.child.role}`
+            : "チャット"))
+        : "新しいチャット";
 
   // ── Mobile Swipe Gestures ──
   const touchStartX = useRef(0);
@@ -635,6 +668,9 @@ function ChatView() {
         onDelete={handleDelete}
         onRefresh={refresh}
         onSettings={handleOpenSettings}
+        appTier={appTier}
+        onMultiAI={() => handleOpenMultiAI()}
+        isMultiAI={isMultiAIPage}
         appIconPreset={settings.appIconPreset}
         loading={loading}
         connected={connected}
@@ -653,13 +689,13 @@ function ChatView() {
           title={headerTitle}
           projectName={projectSlug ?? undefined}
           modelLabel={
-            !isSettingsPage
+            !isSettingsPage && !isMultiAIPage
               ? (activeConv?.summary.modelLabel ??
                 activeSubagentMatch?.child.modelLabel)
               : undefined
           }
           modelProvider={
-            !isSettingsPage
+            !isSettingsPage && !isMultiAIPage
               ? (activeConv?.summary.modelProvider ??
                 activeSubagentMatch?.child.modelProvider)
               : undefined
@@ -667,7 +703,7 @@ function ChatView() {
           targetApp={settings.targetApp}
           onTargetAppChange={(app) => updateSettings({ targetApp: app })}
           onMenuToggle={() => setSidebarOpen(true)}
-          isRunning={!isSettingsPage && isRunning}
+          isRunning={!isSettingsPage && !isMultiAIPage && isRunning}
           workbenchOpen={workbenchOpen}
           onToggleWorkbench={() => {
             setWorkbenchOpen((v) => {
@@ -679,6 +715,7 @@ function ChatView() {
           onOpenPalette={() => setPaletteOpen(true)}
         />
         {!isSettingsPage &&
+          !isMultiAIPage &&
           activeId &&
           (activeSubagentMatch || activeContextSubagents.length > 0) && (
             <div
@@ -771,8 +808,27 @@ function ChatView() {
                 </div>
                 <div className="sidechat-popover-hint">
                   チャット「{branchSource.title}
-                  」から分岐し、本流の記憶や文脈を汚さずに別チャット（Gemini）で仮説検証を行います。
+                  」から分岐し、本流の記憶や文脈を汚さずに
+                  {isProTier ? "別チャットや他社AI" : "別チャット（Gemini）"}
+                  で仮説検証を行います。
                 </div>
+                {isProTier && (
+                  <select
+                    className="wb-path-input"
+                    aria-label="枝分かれ先のAI"
+                    value={sideChatProvider}
+                    onChange={(e) =>
+                      setSideChatProvider(
+                        e.target.value as "antigravity" | ExternalProviderId,
+                      )
+                    }
+                  >
+                    <option value="antigravity">✨ Gemini（別チャットで開く）</option>
+                    <option value="openai">🟢 OpenAI / ChatGPT (Codex)</option>
+                    <option value="anthropic">🟣 Anthropic / Claude</option>
+                    <option value="ollama">🌱 ローカル AI (Ollama)</option>
+                  </select>
+                )}
                 <textarea
                   className="wb-path-input"
                   aria-label="枝分かれで試したい質問"
@@ -804,11 +860,31 @@ function ChatView() {
                         const rawPrompt = sideChatPrompt.trim();
                         const composed = `【枝分かれ検証】元チャット「${branchSource.title}」から分岐:\n\n${rawPrompt}`;
                         const shortTitle = `🌿 ${branchSource.title.slice(0, 18)} (分岐)`;
-                        await launchGeminiChatWithPrompt(
-                          composed,
-                          branchSource.workspaceUri,
-                          shortTitle,
-                        );
+                        const effectiveProvider = isProTier
+                          ? sideChatProvider
+                          : "antigravity";
+                        if (effectiveProvider === "antigravity") {
+                          await launchGeminiChatWithPrompt(
+                            composed,
+                            branchSource.workspaceUri,
+                            shortTitle,
+                          );
+                        } else {
+                          const wsUri =
+                            branchSource.workspaceUri ?? currentWorkspaceUri;
+                          const workspaceDir = wsUri?.startsWith("file://")
+                            ? decodeURIComponent(new URL(wsUri).pathname)
+                            : undefined;
+                          const res = await api.createProviderSession({
+                            provider: effectiveProvider,
+                            prompt: composed,
+                            title: shortTitle,
+                            workspaceDir,
+                            sourceChatId: branchSource.id,
+                            sourceChatTitle: branchSource.title,
+                          });
+                          handleOpenMultiAI(res.session.id);
+                        }
                         setSideChatOpen(false);
                         setSideChatTarget(null);
                         setSideChatPrompt("");
@@ -837,6 +913,13 @@ function ChatView() {
               setOptimisticMessages([]);
               navigate(`/${slug}/${id}`);
             }}
+          />
+        ) : isMultiAIPage && isProTier ? (
+          <MultiAIPanel
+            currentWorkspaceUri={currentWorkspaceUri}
+            initialSessionId={multiAISessionId}
+            onBackToGemini={handleBackToChat}
+            onOpenSettings={handleOpenSettings}
           />
         ) : activeId ? (
           <ChatPanel
@@ -968,7 +1051,7 @@ function ChatView() {
             )}
           </div>
         )}
-        {!isSettingsPage && !connected && (
+        {!isSettingsPage && !isMultiAIPage && !connected && (
           <div className="connection-retry-banner" role="status">
             <span>⚠️ サーバー接続を確認しています…（自動再接続中）</span>
             <button
@@ -983,7 +1066,7 @@ function ChatView() {
             </button>
           </div>
         )}
-        {!isSettingsPage && (
+        {!isSettingsPage && !isMultiAIPage && (
           <ChatInput
             onSend={handleSend}
             onStop={handleStop}
@@ -1011,6 +1094,7 @@ function ChatView() {
             onPermissionPolicyChange={(localPermissionPolicy) => {
               updateSettings({ localPermissionPolicy });
             }}
+            appTier={appTier}
           />
         )}
       </div>
@@ -1021,7 +1105,7 @@ function ChatView() {
         onClose={() => setWorkbenchOpen(false)}
       />
       <AgentMonitorPanel
-        isOpen={agentPanelOpen && !isSettingsPage}
+        isOpen={agentPanelOpen && !isSettingsPage && !isMultiAIPage}
         conversationId={activeContextParent?.id ?? activeId}
         activeId={activeId}
         onClose={() => setAgentPanelOpen(false)}
@@ -1035,7 +1119,7 @@ function ChatView() {
         isOpen={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         conversations={conversations}
-        canBranchSideChat={Boolean(!isSettingsPage && activeId)}
+        canBranchSideChat={Boolean(!isSettingsPage && !isMultiAIPage && activeId)}
         workbenchOpen={workbenchOpen}
         onNewChat={handleNew}
         onSelectChat={(id) => {
@@ -1058,8 +1142,28 @@ function ChatView() {
             new CustomEvent("antigravity-jp-voice-trigger"),
           );
         }}
-        onQuickDispatch={async (_provider, promptText) => {
-          await launchGeminiChatWithPrompt(promptText);
+        appTier={appTier}
+        onOpenMultiAI={() => handleOpenMultiAI()}
+        onQuickDispatch={async (provider: ProviderId, promptText: string) => {
+          if (provider === "antigravity" || !isProTier) {
+            await launchGeminiChatWithPrompt(promptText);
+            return;
+          }
+          const extProvider: ExternalProviderId =
+            provider === "codex"
+              ? "openai"
+              : provider === "claude"
+                ? "anthropic"
+                : "ollama";
+          const workspaceDir = currentWorkspaceUri?.startsWith("file://")
+            ? decodeURIComponent(new URL(currentWorkspaceUri).pathname)
+            : undefined;
+          const res = await api.createProviderSession({
+            provider: extProvider,
+            prompt: promptText,
+            workspaceDir,
+          });
+          handleOpenMultiAI(res.session.id);
         }}
       />
     </div>

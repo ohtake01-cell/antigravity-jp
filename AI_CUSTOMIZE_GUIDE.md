@@ -25,15 +25,17 @@
 │   │           ├── voice.ts          # 音声文字起こし
 │   │           ├── files.ts          # 右ペイン用の安全なファイル読み書き・アップロード
 │   │           ├── jpRule.ts         # ~/.gemini/GEMINI.md の日本語ルール設定 API
-│   │           └── permissions.ts    # LS 権限プリセット取得/更新
+│   │           ├── permissions.ts    # LS 権限プリセット取得/更新
+│   │           └── providers.ts      # 他社AI検出・公式CLIログイン起動・マルチAIセッション API
 │   └── web/            # フロントエンド UI (React 19 + Vite + TypeScript)
 │       └── src/
-│           ├── App.tsx               # メインレイアウト・ルーティング・枝分かれチャット
+│           ├── App.tsx               # メインレイアウト・下位/上位モードルーティング・枝分かれ
 │           ├── api/client.ts         # Proxy API クライアント
 │           ├── components/
-│           │   ├── Sidebar.tsx            # サイドバー（ピン留め・実行中・子チャットツリー・検索）
-│           │   ├── ChatHeader.tsx         # ヘッダー（モデルバッジ・AI重み枠・エージェント/エディタ切替）
-│           │   ├── ChatPanel.tsx          # チャット本文・思考/ツール折りたたみ・エラー表示
+│           │   ├── Sidebar.tsx            # サイドバー（1本スクロール・ピン留め・子チャット階層・上位時のみ⚡マルチAI）
+│           │   ├── ChatHeader.tsx         # ヘッダー（⌘K・エディタ・クォータ残量バー・接続先）
+│           │   ├── ChatPanel.tsx          # チャット本文・インライン編集・思考/ツール折りたたみ
+│           │   ├── MultiAIPanel.tsx       # 上位モード用マルチAIハブ（OpenAI / Claude / Ollama 対話＆ログイン連携）
 │           │   ├── ChatInput.tsx          # 入力欄・モデル選択・Local Permissions・音声・添付
 │           │   ├── TokenQuotaBadge.tsx    # コンテキスト重み・残り枠バッジ
 │           │   ├── WeeklyUsageBadge.tsx   # 週間トークン消費＆残り枠ポップオーバー
@@ -116,4 +118,6 @@ node scripts/build-macos-app.mjs
 - **テーマ・配色変更**: `packages/web/src/styles/variables.css` の CSS 変数を編集
 - **日本語ルールの文言変更**: `packages/proxy/src/routes/jpRule.ts` のテンプレート文字列を編集
 - **サイドバーの表示件数・並び順変更**: `packages/web/src/components/Sidebar.tsx` を編集
-- **チャット送信時の既定モデル・権限変更**: `packages/web/src/hooks/useClientSettings.ts` を編集
+- **チャット送信時の既定モデル・権限・下位/上位モード既定値**: `packages/web/src/hooks/useClientSettings.ts`（`appTier: "lite" | "pro"`）を編集
+- **他社AIプロバイダー連携のカスタマイズ**: `packages/proxy/src/routes/providers.ts` と `packages/web/src/components/MultiAIPanel.tsx` を編集
+- **ローカル専用拡張（個人環境を外出しする口）**: `~/.config/antigravity-jp/extensions.json` に `{ "extensions": [...] }` を置くと `GET /api/providers` から自動で読み込まれます（リポジトリへ個人情報を混ぜずに独自拡張を追加可能）

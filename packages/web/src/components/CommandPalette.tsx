@@ -32,6 +32,8 @@ export interface CommandPaletteProps {
   onOpenFileInWorkbench: (filePath: string) => void;
   onOpenSideChat: () => void;
   onTriggerVoice: () => void;
+  appTier?: import("../types").AppTier;
+  onOpenMultiAI?: () => void;
   onQuickDispatch: (provider: ProviderId, prompt: string) => Promise<void> | void;
 }
 
@@ -120,6 +122,8 @@ export function CommandPalette({
   onOpenFileInWorkbench,
   onOpenSideChat,
   onTriggerVoice,
+  appTier = "lite",
+  onOpenMultiAI,
   onQuickDispatch,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
@@ -240,6 +244,21 @@ export function CommandPalette({
       });
     }
 
+    if (appTier === "pro" && onOpenMultiAI) {
+      items.push({
+        id: "act:multi-ai",
+        group: "action",
+        icon: "⚡",
+        title: "マルチAIハブを開く",
+        subtitle: "OpenAI (Codex) / Anthropic (Claude) / ローカル Ollama と対話",
+        keywords: "multi ai codex claude ollama マルチAI 上位 他社",
+        onSelect: () => {
+          onOpenMultiAI();
+          onClose();
+        },
+      });
+    }
+
     items.push({
       id: "act:settings",
       group: "action",
@@ -354,6 +373,8 @@ export function CommandPalette({
     onOpenFileInWorkbench,
     onOpenSideChat,
     onTriggerVoice,
+    appTier,
+    onOpenMultiAI,
   ]);
 
   const filteredItems = useMemo<PaletteItem[]>(() => {
@@ -387,6 +408,61 @@ export function CommandPalette({
                 }
               },
             },
+            ...(appTier === "pro"
+              ? ([
+                  {
+                    id: "dispatch:codex",
+                    group: "dispatch",
+                    icon: "🟢",
+                    title: `OpenAI (Codex) へ即指示: 「${trimmed.slice(0, 32)}${trimmed.length > 32 ? "…" : ""}」`,
+                    subtitle: "ChatGPT / Codex CLI セッションを開始",
+                    keywords: trimmed,
+                    onSelect: async () => {
+                      setDispatchBusyId("dispatch:codex");
+                      try {
+                        await onQuickDispatch("codex", trimmed);
+                        onClose();
+                      } finally {
+                        setDispatchBusyId(null);
+                      }
+                    },
+                  },
+                  {
+                    id: "dispatch:claude",
+                    group: "dispatch",
+                    icon: "🟣",
+                    title: `Anthropic (Claude) へ即指示: 「${trimmed.slice(0, 32)}${trimmed.length > 32 ? "…" : ""}」`,
+                    subtitle: "Claude Code CLI セッションを開始",
+                    keywords: trimmed,
+                    onSelect: async () => {
+                      setDispatchBusyId("dispatch:claude");
+                      try {
+                        await onQuickDispatch("claude", trimmed);
+                        onClose();
+                      } finally {
+                        setDispatchBusyId(null);
+                      }
+                    },
+                  },
+                  {
+                    id: "dispatch:ollama",
+                    group: "dispatch",
+                    icon: "🌱",
+                    title: `ローカル AI (Ollama) へ即指示: 「${trimmed.slice(0, 30)}${trimmed.length > 30 ? "…" : ""}」`,
+                    subtitle: "ローカル LLM セッションを開始",
+                    keywords: trimmed,
+                    onSelect: async () => {
+                      setDispatchBusyId("dispatch:ollama");
+                      try {
+                        await onQuickDispatch("ollama", trimmed);
+                        onClose();
+                      } finally {
+                        setDispatchBusyId(null);
+                      }
+                    },
+                  },
+                ] as PaletteItem[])
+              : []),
           ]
         : [];
 

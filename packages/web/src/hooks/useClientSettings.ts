@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: ClientSettings = {
   plannerModeAutoMigrated: true,
   browserNotificationsEnabled: false,
   targetApp: "all",
+  appTier: "lite",
   appIconPreset: DEFAULT_APP_ICON_PRESET,
 };
 

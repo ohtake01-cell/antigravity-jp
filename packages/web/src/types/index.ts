@@ -415,6 +415,67 @@ export interface ProjectEntry {
   isDefaultCli?: boolean;
 }
 
+export type AppTier = "lite" | "pro";
+
+export type ExternalProviderId = "openai" | "anthropic" | "ollama";
+export type UnifiedProviderId = "google" | ExternalProviderId;
+
+export interface ProviderModelItem {
+  id: string;
+  label: string;
+}
+
+export interface ProviderAccountInfo {
+  id: UnifiedProviderId;
+  name: string;
+  company: string;
+  description: string;
+  status: "ready" | "needs_login" | "not_installed" | "offline";
+  installed: boolean;
+  authenticated: boolean;
+  accountHint?: string | null;
+  activeModel?: string | null;
+  models: ProviderModelItem[];
+  supportsOfficialLogin: boolean;
+  loginCommand?: string;
+  installCommand?: string;
+  loginHint?: string;
+}
+
+export interface ProvidersResponse {
+  updatedAt: string;
+  providers: ProviderAccountInfo[];
+  extensions?: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    url?: string;
+    enabled?: boolean;
+  }>;
+}
+
+export interface MultiAIMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+  error?: boolean;
+}
+
+export interface MultiAISession {
+  id: string;
+  provider: ExternalProviderId;
+  title: string;
+  model: string | null;
+  status: "idle" | "running" | "error";
+  workspaceDir?: string;
+  sourceChatId?: string;
+  sourceChatTitle?: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: MultiAIMessage[];
+}
+
 export interface ClientSettings {
   /** Model ID used when the user hasn't explicitly picked one per-message. */
   defaultModel: string | null;
@@ -428,7 +489,9 @@ export interface ClientSettings {
   browserNotificationsEnabled: boolean;
   /** Target application engine filter (antigravity vs antigravity-ide vs all). */
   targetApp: TargetApp;
-  /** User-selected NiraiBrain app icon preset. */
+  /** App edition tier: "lite" (Gemini-only simple) vs "pro" (Multi-AI + provider logins). */
+  appTier?: AppTier;
+  /** User-selected app icon preset. */
   appIconPreset?: AppIconPreset;
 }
 

@@ -24,11 +24,16 @@ function getNativeBridge(): { postMessage: (msg: unknown) => void } | null {
   const w = window as unknown as {
     webkit?: {
       messageHandlers?: {
+        agJpNative?: { postMessage: (msg: unknown) => void };
         antigravityNative?: { postMessage: (msg: unknown) => void };
       };
     };
   };
-  return w.webkit?.messageHandlers?.antigravityNative ?? null;
+  return (
+    w.webkit?.messageHandlers?.agJpNative ??
+    w.webkit?.messageHandlers?.antigravityNative ??
+    null
+  );
 }
 
 export function isNativeNotificationBridgeAvailable(): boolean {

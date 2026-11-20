@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import type { ConversationEntry } from "../hooks/useConversations";
 import { getAppIconUrl } from "../hooks/useClientSettings";
-import type { AppIconPreset, ProjectEntry } from "../types";
+import type { AppIconPreset, AppTier, ProjectEntry } from "../types";
 import { api } from "../api/client";
 import { workspaceNameFromMetadata } from "../utils/workspaceNames";
 import {
@@ -28,6 +28,9 @@ interface Props {
   onDelete: (id: string) => void;
   onRefresh?: () => void;
   onSettings: () => void;
+  appTier?: AppTier;
+  onMultiAI?: () => void;
+  isMultiAI?: boolean;
   appIconPreset?: AppIconPreset;
   loading: boolean;
   connected: boolean;
@@ -377,6 +380,9 @@ export function Sidebar({
   onDelete,
   onRefresh,
   onSettings,
+  appTier = "lite",
+  onMultiAI,
+  isMultiAI = false,
   appIconPreset,
   loading,
   connected,
@@ -879,6 +885,20 @@ export function Sidebar({
 
   const actions: SidebarAction[] = [
     { icon: <IconPlus size={14} />, label: "新規チャット", onClick: onNew },
+    ...(appTier === "pro" && onMultiAI
+      ? [
+          {
+            icon: (
+              <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>
+                ⚡
+              </span>
+            ),
+            label: "マルチAI",
+            onClick: onMultiAI,
+            active: isMultiAI,
+          },
+        ]
+      : []),
     {
       icon: <IconSearch size={14} />,
       label: "検索",

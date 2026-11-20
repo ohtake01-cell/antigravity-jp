@@ -58,6 +58,10 @@ describe("SettingsPanel", () => {
     );
 
     expect(screen.getByText("設定")).toBeInTheDocument();
+    expect(screen.getByText("表示モード（下位 / 上位モデル切替）")).toBeInTheDocument();
+    expect(screen.getByText("🌿 シンプル版（下位）")).toBeInTheDocument();
+    expect(screen.getByText("⚡ マルチAI版（上位）")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-accounts-section")).not.toBeInTheDocument();
     expect(screen.getByText("接続先AIエンジン")).toBeInTheDocument();
     expect(screen.getByText("既定のモデル")).toBeInTheDocument();
     expect(screen.getByText("既定のモード")).toBeInTheDocument();

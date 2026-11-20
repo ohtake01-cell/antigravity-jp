@@ -58,6 +58,8 @@ interface Props {
   permissionPolicy?: LocalPermissionPolicy;
   /** Called when the user changes Local Permissions from the composer menu. */
   onPermissionPolicyChange?: (policy: LocalPermissionPolicy) => void;
+  /** App edition tier ("lite" = Gemini-only, "pro" = Multi-AI). */
+  appTier?: import("../types").AppTier;
 }
 
 interface AttachmentPreview {
@@ -378,6 +380,7 @@ export function ChatInput({
   defaultPlannerType,
   permissionPolicy = "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER",
   onPermissionPolicyChange,
+  appTier = "lite",
 }: Props) {
   const effectiveDefault = defaultModel ?? DEFAULT_MODEL;
   const [model, setModel] = useState<string | null>(
@@ -1178,7 +1181,7 @@ export function ChatInput({
           </div>
 
           <div className="chat-input-bottom-right">
-            <WeeklyUsageBadge selectedModel={model} />
+            <WeeklyUsageBadge selectedModel={model} appTier={appTier} />
             <ModelSelector
               selectedModel={model}
               onSelect={handleManualModelSelect}

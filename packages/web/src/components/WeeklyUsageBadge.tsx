@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../api/client";
 import type {
+  AppTier,
   WeeklyUsageResponse,
   AgentWeeklyBucket,
   ModelCatalogResponse,
@@ -178,8 +179,10 @@ function AgentRow({
 
 export function WeeklyUsageBadge({
   selectedModel,
+  appTier = "lite",
 }: {
   selectedModel?: string | null;
+  appTier?: AppTier;
 }) {
   const [data, setData] = useState<WeeklyUsageResponse | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalogResponse | null>(null);
@@ -381,6 +384,22 @@ export function WeeklyUsageBadge({
                 accent="#60a5fa"
                 quotaOverride={gearQuota}
               />
+              {appTier === "pro" && catalog?.providers.openai.activeModelLabel && (
+                <AgentRow
+                  name="OpenAI (Codex)"
+                  modelLabel={catalog.providers.openai.activeModelLabel}
+                  bucket={data.codex}
+                  accent="#34d399"
+                />
+              )}
+              {appTier === "pro" && catalog?.providers.anthropic.activeModelLabel && (
+                <AgentRow
+                  name="Anthropic (Claude)"
+                  modelLabel={catalog.providers.anthropic.activeModelLabel}
+                  bucket={data.code}
+                  accent="#c084fc"
+                />
+              )}
 
               <div
                 style={{

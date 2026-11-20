@@ -13,9 +13,11 @@ import {
 import { workspaceNameFromMetadata } from "../utils/workspaceNames";
 import { DEFAULT_APP_ICON_PRESET } from "../hooks/useClientSettings";
 import type {
+  AppTier,
   ClientSettings,
   ConversationSummary,
   ModelCatalogResponse,
+  ProviderAccountInfo,
   TargetApp,
 } from "../types";
 import type { PlannerType } from "./ChatInput";
@@ -88,6 +90,34 @@ export function SettingsPanel({
   const [archivedLoading, setArchivedLoading] = useState(true);
   const [archiveQuery, setArchiveQuery] = useState("");
   const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  // Unified Pro-tier provider account & login state
+  const isProTier = (settings.appTier ?? "lite") === "pro";
+  const [providers, setProviders] = useState<ProviderAccountInfo[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [providerFeedback, setProviderFeedback] = useState<{
+    text: string;
+    error?: boolean;
+  } | null>(null);
+
+  const fetchProviders = useCallback(async (force = false) => {
+    setProvidersLoading(true);
+    try {
+      const res = await Promise.resolve(api.providers?.(force)).catch(
+        () => null,
+      );
+      if (res?.providers) {
+        setProviders(res.providers);
+      }
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isProTier) return;
+    void fetchProviders(false);
+  }, [isProTier, fetchProviders]);
 
   const fetchModels = useCallback(async (retries = 3, forceCatalog = false) => {
     if (forceCatalog) setCatalogRefreshing(true);
@@ -225,6 +255,41 @@ export function SettingsPanel({
     [onUpdate, flashSaved],
   );
 
+  const handleTierChange = useCallback(
+    (tier: AppTier) => {
+      onUpdate({ appTier: tier });
+      flashSaved(
+        tier === "pro"
+          ? "上位版（マルチAI）に切り替えました"
+          : "シンプル版（Gemini専用）に切り替えました",
+      );
+    },
+    [onUpdate, flashSaved],
+  );
+
+  const handleProviderLogin = useCallback(
+    async (providerId: "openai" | "anthropic") => {
+      setProviderFeedback(null);
+      try {
+        const res = await api.providerLogin(providerId);
+        setProviderFeedback({
+          text:
+            res.message ||
+            "公式ログイン画面を起動しました。サインイン後に「状態を再確認」を押してください。",
+        });
+      } catch (err) {
+        setProviderFeedback({
+          text:
+            err instanceof Error
+              ? err.message
+              : "ログインの起動に失敗しました",
+          error: true,
+        });
+      }
+    },
+    [],
+  );
+
   const handleRestoreArchived = useCallback(
     async (entry: ArchivedEntry, openAfterRestore: boolean) => {
       setRestoringId(entry.id);
@@ -298,6 +363,144 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-body">
+        {/* ── エディション切替（下位 / 上位モデル統合） ── */}
+        <div className="settings-section" data-testid="edition-tier-section">
+          <h2 className="settings-section-title">表示モード（下位 / 上位モデル切替）</h2>
+          <div className="tier-switcher-grid" role="radiogroup" aria-label="表示モード切替">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!isProTier}
+              className={`tier-card ${!isProTier ? "active" : ""}`}
+              onClick={() => handleTierChange("lite")}
+            >
+              <div className="tier-card-head">
+                <span className="tier-card-title">🌿 シンプル版（下位）</span>
+                <span className="tier-card-badge">Gemini専用</span>
+              </div>
+              <span className="tier-card-desc">
+                Gemini（Antigravity）のみをスッキリ表示する標準モード。初めての方や普段使いにおすすめです。
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={isProTier}
+              className={`tier-card ${isProTier ? "active" : ""}`}
+              onClick={() => handleTierChange("pro")}
+            >
+              <div className="tier-card-head">
+                <span className="tier-card-title">⚡ マルチAI版（上位）</span>
+                <span className="tier-card-badge">他社AI連携</span>
+              </div>
+              <span className="tier-card-desc">
+                OpenAI（ChatGPT / Codex）・Anthropic（Claude）・ローカル Ollama を各社公式ログインで追加して使い分けられます。
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* ── 他社AIアカウント連携（上位モード時のみ表示） ── */}
+        {isProTier && (
+          <div className="settings-section" data-testid="provider-accounts-section">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                marginBottom: 4,
+              }}
+            >
+              <h2 className="settings-section-title" style={{ margin: 0 }}>
+                他社AIアカウント連携（公式ログインで追加）
+              </h2>
+              <button
+                type="button"
+                className="settings-archive-btn"
+                disabled={providersLoading}
+                onClick={() => void fetchProviders(true)}
+              >
+                {providersLoading ? "確認中…" : "↻ 状態を再確認"}
+              </button>
+            </div>
+            <span className="settings-row-desc">
+              公式 CLI のブラウザ OAuth ログインを使って、追加 API 課金なしでお手持ちのサブスク枠（ChatGPT Plus/Pro・Claude Pro/Max・ローカル Ollama）を安全に追加できます。
+            </span>
+
+            {providerFeedback && (
+              <div
+                className={`provider-feedback-banner ${providerFeedback.error ? "error" : ""}`}
+                role="status"
+              >
+                {providerFeedback.text}
+              </div>
+            )}
+
+            <div className="provider-cards-grid">
+              {providers.map((prov) => {
+                const statusText =
+                  prov.status === "ready"
+                    ? "接続済み"
+                    : prov.status === "needs_login"
+                      ? "要ログイン"
+                      : prov.status === "not_installed"
+                        ? "CLI未導入"
+                        : "オフライン";
+                return (
+                  <div
+                    key={prov.id}
+                    className={`provider-card status-${prov.status}`}
+                  >
+                    <div className="provider-card-top">
+                      <div>
+                        <div className="provider-card-name">{prov.name}</div>
+                        <div className="provider-card-company">
+                          {prov.company}
+                        </div>
+                      </div>
+                      <span className={`provider-status-pill ${prov.status}`}>
+                        {statusText}
+                      </span>
+                    </div>
+                    <div className="provider-card-desc">{prov.description}</div>
+                    {prov.accountHint && (
+                      <div className="provider-card-meta">
+                        状態: {prov.accountHint}
+                        {prov.activeModel ? ` · ${prov.activeModel}` : ""}
+                      </div>
+                    )}
+                    <div className="provider-card-actions">
+                      {prov.supportsOfficialLogin &&
+                        (prov.id === "openai" || prov.id === "anthropic") &&
+                        prov.installed && (
+                          <button
+                            type="button"
+                            className="provider-login-btn"
+                            onClick={() =>
+                              void handleProviderLogin(
+                                prov.id as "openai" | "anthropic",
+                              )
+                            }
+                          >
+                            {prov.authenticated
+                              ? "🔐 別アカウントで再ログイン"
+                              : "🔐 ログインして追加"}
+                          </button>
+                        )}
+                      {!prov.installed && prov.installCommand && (
+                        <code className="provider-cmd-code">
+                          {prov.installCommand}
+                        </code>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ── 日本語応答ルール ── */}
         <div className="settings-section">
           <h2 className="settings-section-title">AI 応答の日本語固定</h2>
@@ -430,7 +633,14 @@ export function SettingsPanel({
                   {catalogRefreshing ? "同期中…" : "↻ 最新を取得"}
                 </button>
               </div>
-              {([catalog.providers.google] as const).map((prov) => (
+              {(isProTier
+                ? ([
+                    catalog.providers.google,
+                    catalog.providers.openai,
+                    catalog.providers.anthropic,
+                  ] as const)
+                : ([catalog.providers.google] as const)
+              ).map((prov) => (
                 <div
                   key={prov.provider}
                   style={{

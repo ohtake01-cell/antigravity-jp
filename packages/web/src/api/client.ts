@@ -794,4 +794,66 @@ export const api = {
       backupPath?: string | null;
       error?: string;
     }>("/api/jp-rule", { method: "POST" }),
+
+  providers: (refresh = false) =>
+    request<import("../types").ProvidersResponse>(
+      `/api/providers${refresh ? "?refresh=1" : ""}`,
+      undefined,
+      15_000,
+    ),
+
+  providerLogin: (providerId: "openai" | "anthropic") =>
+    request<{
+      ok: boolean;
+      launched?: boolean;
+      needsInstall?: boolean;
+      command?: string;
+      installCommand?: string;
+      message?: string;
+      error?: string;
+    }>(`/api/providers/${encodeURIComponent(providerId)}/login`, {
+      method: "POST",
+    }),
+
+  providerSessions: () =>
+    request<{ sessions: import("../types").MultiAISession[] }>(
+      "/api/providers/sessions",
+    ),
+
+  createProviderSession: (payload: {
+    provider: import("../types").ExternalProviderId;
+    model?: string | null;
+    prompt: string;
+    title?: string;
+    workspaceDir?: string;
+    sourceChatId?: string;
+    sourceChatTitle?: string;
+  }) =>
+    request<{ ok: boolean; session: import("../types").MultiAISession }>(
+      "/api/providers/sessions",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      30_000,
+    ),
+
+  sendProviderSessionMessage: (
+    sessionId: string,
+    payload: { prompt: string; model?: string | null },
+  ) =>
+    request<{ ok: boolean; session: import("../types").MultiAISession }>(
+      `/api/providers/sessions/${encodeURIComponent(sessionId)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      30_000,
+    ),
+
+  deleteProviderSession: (sessionId: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/api/providers/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    ),
 };

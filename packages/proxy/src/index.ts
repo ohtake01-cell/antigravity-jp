@@ -24,6 +24,7 @@ import { registerUsageRoutes } from "./routes/usage.js";
 import { registerVoiceRoutes } from "./routes/voice.js";
 import { registerJpRuleRoutes } from "./routes/jpRule.js";
 import { registerPermissionAndVoiceRoutes } from "./routes/permissions.js";
+import { registerProviderRoutes } from "./routes/providers.js";
 import {
   assertSupportedListenHost,
   formatListenAddress,
@@ -86,6 +87,7 @@ registerUsageRoutes(app);
 registerVoiceRoutes(app);
 registerJpRuleRoutes(app);
 registerPermissionAndVoiceRoutes(app);
+registerProviderRoutes(app);
 
 // ── ビルド済み Web UI の一体配信（単体起動モード） ──
 
