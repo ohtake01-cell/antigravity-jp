@@ -94,4 +94,29 @@ describe("Providers & Multi-AI routes", () => {
     const listBody = (await listRes.json()) as { sessions: unknown[] };
     expect(Array.isArray(listBody.sessions)).toBe(true);
   });
+
+  it("validates POST /api/providers/compare requires >= 2 valid providers and non-empty prompt", async () => {
+    const app = createApp();
+    const oneProvider = await app.request("/api/providers/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providers: ["openai"], prompt: "比較して" }),
+    });
+    expect(oneProvider.status).toBe(400);
+
+    const emptyPrompt = await app.request("/api/providers/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providers: ["openai", "anthropic"], prompt: "" }),
+    });
+    expect(emptyPrompt.status).toBe(400);
+  });
+
+  it("returns 404 on POST /api/providers/sessions/:id/retry for unknown session", async () => {
+    const res = await createApp().request(
+      "/api/providers/sessions/does-not-exist/retry",
+      { method: "POST" },
+    );
+    expect(res.status).toBe(404);
+  });
 });

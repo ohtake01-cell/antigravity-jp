@@ -55,6 +55,7 @@ export interface MultiAIMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  elapsedMs?: number;
   error?: boolean;
 }
 
@@ -64,6 +65,7 @@ export interface MultiAISession {
   title: string;
   model: string | null;
   status: "idle" | "running" | "error";
+  compareGroupId?: string;
   workspaceDir?: string;
   sourceChatId?: string;
   sourceChatTitle?: string;
@@ -625,6 +627,36 @@ async function executeProviderTurn(session: MultiAISession): Promise<string> {
   throw new Error(`未対応のプロバイダーです: ${session.provider}`);
 }
 
+function runSessionTurnAsync(session: MultiAISession): void {
+  const startedAt = Date.now();
+  void (async () => {
+    try {
+      const reply = await executeProviderTurn(session);
+      session.messages.push({
+        id: randomUUID(),
+        role: "assistant",
+        content: reply,
+        createdAt: new Date().toISOString(),
+        elapsedMs: Date.now() - startedAt,
+      });
+      session.status = "idle";
+    } catch (err) {
+      session.messages.push({
+        id: randomUUID(),
+        role: "assistant",
+        content: `エラー: ${err instanceof Error ? err.message : String(err)}`,
+        createdAt: new Date().toISOString(),
+        elapsedMs: Date.now() - startedAt,
+        error: true,
+      });
+      session.status = "error";
+    } finally {
+      session.updatedAt = new Date().toISOString();
+      await persistSessions();
+    }
+  })();
+}
+
 function launchOfficialLoginInTerminal(
   provider: "openai" | "anthropic",
   binPath: string,
@@ -799,34 +831,78 @@ export function registerProviderRoutes(app: Hono): void {
 
     sessionsMap.set(session.id, session);
     void persistSessions();
-
-    // Run turn asynchronously so client gets immediate session ID
-    void (async () => {
-      try {
-        const reply = await executeProviderTurn(session);
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: reply,
-          createdAt: new Date().toISOString(),
-        });
-        session.status = "idle";
-      } catch (err) {
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: `エラー: ${err instanceof Error ? err.message : String(err)}`,
-          createdAt: new Date().toISOString(),
-          error: true,
-        });
-        session.status = "error";
-      } finally {
-        session.updatedAt = new Date().toISOString();
-        await persistSessions();
-      }
-    })();
+    runSessionTurnAsync(session);
 
     return c.json({ ok: true, session }, 201);
+  });
+
+  // ── Parallel Multi-AI Comparison (fire 2+ providers simultaneously) ──
+  app.post("/api/providers/compare", async (c) => {
+    await ensureSessionsLoaded();
+    let body: {
+      providers?: string[];
+      models?: Record<string, string | null | undefined>;
+      prompt?: string;
+      workspaceDir?: string;
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const prompt = (body.prompt ?? "").trim();
+    if (!prompt) {
+      return c.json({ error: "比較する質問を入力してください" }, 400);
+    }
+    const validProviders = Array.from(
+      new Set(
+        (body.providers ?? []).filter(
+          (p): p is ExternalProviderId =>
+            p === "openai" || p === "anthropic" || p === "ollama",
+        ),
+      ),
+    );
+    if (validProviders.length < 2) {
+      return c.json(
+        { error: "並列比較には 2 つ以上の AI プロバイダーを選択してください" },
+        400,
+      );
+    }
+
+    const groupId = randomUUID();
+    const now = new Date().toISOString();
+    const baseTitle = `⚖️ ${prompt.replace(/\s+/g, " ").slice(0, 24)}`;
+    const created: MultiAISession[] = [];
+
+    for (const provider of validProviders) {
+      const modelOverride = body.models?.[provider]?.trim() || null;
+      const session: MultiAISession = {
+        id: randomUUID(),
+        provider,
+        title: baseTitle,
+        model: modelOverride,
+        status: "running",
+        compareGroupId: groupId,
+        workspaceDir: body.workspaceDir?.trim() || undefined,
+        createdAt: now,
+        updatedAt: now,
+        messages: [
+          {
+            id: randomUUID(),
+            role: "user",
+            content: prompt,
+            createdAt: now,
+          },
+        ],
+      };
+      sessionsMap.set(session.id, session);
+      created.push(session);
+      runSessionTurnAsync(session);
+    }
+
+    void persistSessions();
+    return c.json({ ok: true, groupId, sessions: created }, 201);
   });
 
   app.post("/api/providers/sessions/:id/messages", async (c) => {
@@ -864,31 +940,33 @@ export function registerProviderRoutes(app: Hono): void {
     session.status = "running";
     session.updatedAt = now;
     void persistSessions();
+    runSessionTurnAsync(session);
 
-    void (async () => {
-      try {
-        const reply = await executeProviderTurn(session);
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: reply,
-          createdAt: new Date().toISOString(),
-        });
-        session.status = "idle";
-      } catch (err) {
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: `エラー: ${err instanceof Error ? err.message : String(err)}`,
-          createdAt: new Date().toISOString(),
-          error: true,
-        });
-        session.status = "error";
-      } finally {
-        session.updatedAt = new Date().toISOString();
-        await persistSessions();
-      }
-    })();
+    return c.json({ ok: true, session });
+  });
+
+  app.post("/api/providers/sessions/:id/retry", async (c) => {
+    await ensureSessionsLoaded();
+    const session = sessionsMap.get(c.req.param("id"));
+    if (!session) {
+      return c.json({ error: "セッションが見つかりません" }, 404);
+    }
+    if (session.status === "running") {
+      return c.json({ error: "現在応答を生成中です" }, 409);
+    }
+    // Remove trailing error assistant message so retry re-runs the last user turn cleanly
+    const last = session.messages[session.messages.length - 1];
+    if (last && last.role === "assistant" && last.error) {
+      session.messages.pop();
+    }
+    if (!session.messages.some((m) => m.role === "user")) {
+      return c.json({ error: "再試行できるユーザー発言がありません" }, 400);
+    }
+
+    session.status = "running";
+    session.updatedAt = new Date().toISOString();
+    void persistSessions();
+    runSessionTurnAsync(session);
 
     return c.json({ ok: true, session });
   });

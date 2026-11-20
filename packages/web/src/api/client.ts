@@ -856,4 +856,30 @@ export const api = {
       `/api/providers/sessions/${encodeURIComponent(sessionId)}`,
       { method: "DELETE" },
     ),
+
+  retryProviderSession: (sessionId: string) =>
+    request<{ ok: boolean; session: import("../types").MultiAISession }>(
+      `/api/providers/sessions/${encodeURIComponent(sessionId)}/retry`,
+      { method: "POST" },
+      30_000,
+    ),
+
+  compareProviders: (payload: {
+    providers: import("../types").ExternalProviderId[];
+    models?: Partial<Record<import("../types").ExternalProviderId, string | null>>;
+    prompt: string;
+    workspaceDir?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      groupId: string;
+      sessions: import("../types").MultiAISession[];
+    }>(
+      "/api/providers/compare",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      30_000,
+    ),
 };

@@ -459,6 +459,7 @@ export interface MultiAIMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  elapsedMs?: number;
   error?: boolean;
 }
 
@@ -468,6 +469,7 @@ export interface MultiAISession {
   title: string;
   model: string | null;
   status: "idle" | "running" | "error";
+  compareGroupId?: string;
   workspaceDir?: string;
   sourceChatId?: string;
   sourceChatTitle?: string;
