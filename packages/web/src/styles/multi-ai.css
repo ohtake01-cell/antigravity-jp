@@ -629,7 +629,7 @@
   display: none;
 }
 
-/* ── Mobile Responsive (iPhone / Android) ── */
+/* ── Mobile Responsive (iPhone / Android — Single Unified Vertical Scroll) ── */
 
 @media (max-width: 720px) {
   .tier-switcher-grid,
@@ -637,20 +637,80 @@
     grid-template-columns: 1fr;
   }
 
+  /* Single continuous vertical scroll: no fixed top/bottom bars splitting the screen */
+  .multi-ai-panel {
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .multi-ai-top-bar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .multi-ai-provider-strip {
+    scrollbar-width: none;
+    padding-bottom: 0;
+  }
+
+  .multi-ai-provider-strip::-webkit-scrollbar {
+    display: none;
+  }
+
   .multi-ai-body {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    overflow: visible;
+    height: auto;
   }
 
   .multi-ai-body.mobile-chat-open .multi-ai-sessions-col {
     display: none;
   }
 
-  .multi-ai-body:not(.mobile-chat-open) .multi-ai-chat-col {
-    display: none;
+  .multi-ai-sessions-col,
+  .multi-ai-chat-col,
+  .multi-ai-chat-scroll,
+  .multi-ai-compare-wrap,
+  .multi-ai-compare-scroll {
+    flex: none;
+    overflow: visible;
+    height: auto;
+    min-height: 0;
   }
 
   .multi-ai-sessions-col {
     border-right: none;
+    padding: 10px 12px 24px;
+  }
+
+  .multi-ai-chat-scroll,
+  .multi-ai-compare-scroll {
+    padding: 12px;
+  }
+
+  .multi-ai-compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .multi-ai-presets {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+
+  .multi-ai-presets::-webkit-scrollbar {
+    display: none;
+  }
+
+  .multi-ai-preset-chip {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .multi-ai-mobile-back {
@@ -667,6 +727,7 @@
   }
 
   .multi-ai-composer {
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    margin-top: 8px;
+    padding: 10px 12px calc(18px + env(safe-area-inset-bottom, 0px));
   }
 }
