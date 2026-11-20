@@ -632,10 +632,7 @@
 }
 
 .context-menu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 2px;
+  position: relative;
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
@@ -1176,6 +1173,8 @@ button.sidebar-pin-badge:hover {
 .sidebar-project-path-sub {
   font-size: 10px;
   font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary);
   opacity: 0.78;
   overflow: hidden;
