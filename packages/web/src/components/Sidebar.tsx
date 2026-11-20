@@ -1180,14 +1180,8 @@ export function Sidebar({
     const hasActiveTask = activeTasks.length > 0;
     const hasAgentActivity = hasRunningSubagent || hasActiveTask;
     const agentTreeCount = subagents.length + activeTasks.length;
-    const hasActiveChild = subagents.some((s) => s.id === activeId);
-    // Default to expanded for active/running chats or small agent sets (<= 3);
-    // collapse large idle agent trees by default so pinned/other chats stay visible.
-    const isSubagentsOpen =
-      expandedSubagents[conv.id] ??
-      (hasAgentActivity ||
-        hasActiveChild ||
-        (agentTreeCount > 0 && (isActive || agentTreeCount <= 3)));
+    // エージェント一覧は初期状態では常に折りたたむ（見たい時だけタップで展開してスッキリ表示）
+    const isSubagentsOpen = expandedSubagents[conv.id] ?? false;
     const lastSeen = seenAt[conv.id];
     const displayTitle =
       (localTitleOverrides[conv.id] ?? conv.summary.summary)?.trim() ||

@@ -140,6 +140,10 @@ describe("Sidebar", () => {
     expect(groupHeaders[0]).toBe("⚡ 実行中");
     expect(groupHeaders[1]).toBe("📌 ピン留め");
 
+    // Collapsed by default; expands on tap
+    expect(screen.queryByText("調査ワーカー")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/エージェント稼働中 \(1件\)/));
+
     const childBtn = screen.getByText("調査ワーカー");
     expect(childBtn).toBeInTheDocument();
     fireEvent.click(childBtn);
@@ -298,6 +302,9 @@ describe("Sidebar", () => {
       />,
     );
 
+    expect(screen.queryByTestId("sidebar-subagent-model-badge")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/エージェント稼働中 \(1件\)/));
+
     const subBadge = screen.getByTestId("sidebar-subagent-model-badge");
     expect(subBadge).toHaveTextContent("Flash 3.8 · High");
     expect(subBadge).toHaveClass("provider-google");
@@ -441,9 +448,8 @@ describe("Sidebar", () => {
       />,
     );
 
-    // Idle child subagent is immediately visible without extra click
-    expect(screen.getByText("画面チェッカー")).toBeInTheDocument();
-    expect(screen.getByText("browser")).toBeInTheDocument();
+    // Idle child subagent is collapsed by default so the sidebar stays uncluttered
+    expect(screen.queryByText("画面チェッカー")).not.toBeInTheDocument();
 
     // Filter to subagent-bearing chats only
     const filterWrap = screen.getByTestId("sidebar-subagent-filter");
@@ -452,7 +458,10 @@ describe("Sidebar", () => {
     expect(screen.getByText("親チャットA")).toBeInTheDocument();
     expect(screen.queryByText("単独チャットB")).not.toBeInTheDocument();
 
-    // Clicking the child subagent opens it directly
+    // Expand agent tree on demand, then click child subagent
+    fireEvent.click(screen.getByText(/エージェント \(1件\)/));
+    expect(screen.getByText("画面チェッカー")).toBeInTheDocument();
+    expect(screen.getByText("browser")).toBeInTheDocument();
     fireEvent.click(screen.getByText("画面チェッカー"));
     expect(onSelect).toHaveBeenCalledWith("child-idle-1");
   });
@@ -629,8 +638,10 @@ describe("Sidebar", () => {
       />,
     );
 
-    // Unified agent tree shows both subagent and active background task + log detail link
+    // Unified agent tree is collapsed by default and opens on click
     expect(screen.getByText(/エージェント稼働中 \(2件\)/)).toBeInTheDocument();
+    expect(screen.queryByText("コード調査エージェント")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/エージェント稼働中 \(2件\)/));
     expect(screen.getByText("コード調査エージェント")).toBeInTheDocument();
     expect(screen.getByText("⚙️ task-777")).toBeInTheDocument();
 
