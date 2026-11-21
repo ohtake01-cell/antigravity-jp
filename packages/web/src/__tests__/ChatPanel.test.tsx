@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "../components/ChatPanel";
@@ -419,5 +419,50 @@ describe("ChatPanel", () => {
     expect(toggleBtn).toHaveTextContent("▲ 折りたたむ");
     await userEvent.click(toggleBtn);
     expect(toggleBtn).toHaveTextContent("▼ 全文を表示");
+  });
+
+  it("shows floating scroll-to-bottom arrow when scrolled up and jumps to bottom on click", () => {
+    mockSteps(
+      [
+        {
+          type: "CORTEX_STEP_TYPE_USER_INPUT",
+          userInput: { items: [{ text: "上のメッセージ" }] },
+        },
+        {
+          type: "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+          plannerResponse: { modifiedResponse: "最新の返答" },
+        },
+      ],
+      false,
+      0,
+    );
+
+    const { container } = render(
+      <ChatPanel
+        cascadeId="cascade-scroll-arrow"
+        onRevert={vi.fn()}
+        onFilePermission={vi.fn()}
+      />,
+    );
+
+    const chatArea = container.querySelector(".chat-area") as HTMLDivElement;
+    expect(chatArea).toBeTruthy();
+    expect(screen.queryByTestId("scroll-to-bottom-btn")).not.toBeInTheDocument();
+
+    const scrollToSpy = vi.fn();
+    Object.defineProperty(chatArea, "scrollHeight", { value: 2400, configurable: true });
+    Object.defineProperty(chatArea, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(chatArea, "scrollTop", { value: 100, writable: true, configurable: true });
+    chatArea.scrollTo = scrollToSpy;
+
+    fireEvent.scroll(chatArea);
+
+    const btn = screen.getByTestId("scroll-to-bottom-btn");
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute("aria-label", "一番下へスクロール");
+
+    fireEvent.click(btn);
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 2400, behavior: "smooth" });
+    expect(screen.queryByTestId("scroll-to-bottom-btn")).not.toBeInTheDocument();
   });
 });

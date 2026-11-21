@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import {
   Routes,
   Route,
@@ -14,29 +14,33 @@ import { ChatInput } from "./components/ChatInput";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { IconFolder } from "./components/Icons";
+import {
+  AppErrorBoundary,
+  lazyWithRetry,
+} from "./components/AppErrorBoundary";
 
-// 初期チャット画面に不要な大型パネルは遅延ロードで初期バンドルを軽量化
-const SettingsPanel = lazy(() =>
+// 初期チャット画面に不要な大型パネルは遅延ロードで初期バンドルを軽量化（旧チャンクズレ時は自動更新）
+const SettingsPanel = lazyWithRetry(() =>
   import("./components/SettingsPanel").then((m) => ({
     default: m.SettingsPanel,
   })),
 );
-const MultiAIPanel = lazy(() =>
+const MultiAIPanel = lazyWithRetry(() =>
   import("./components/MultiAIPanel").then((m) => ({
     default: m.MultiAIPanel,
   })),
 );
-const CommandPalette = lazy(() =>
+const CommandPalette = lazyWithRetry(() =>
   import("./components/CommandPalette").then((m) => ({
     default: m.CommandPalette,
   })),
 );
-const ArtifactWorkbench = lazy(() =>
+const ArtifactWorkbench = lazyWithRetry(() =>
   import("./components/ArtifactWorkbench").then((m) => ({
     default: m.ArtifactWorkbench,
   })),
 );
-const AgentMonitorPanel = lazy(() =>
+const AgentMonitorPanel = lazyWithRetry(() =>
   import("./components/AgentMonitorPanel").then((m) => ({
     default: m.AgentMonitorPanel,
   })),
@@ -1190,33 +1194,47 @@ function ChatView() {
         )}
       </div>
       {workbenchOpen && (
-        <Suspense fallback={null}>
-          <ArtifactWorkbench
-            isOpen={workbenchOpen}
-            initialFileRef={workbenchFileRef}
-            currentWorkspaceUri={currentWorkspaceUri}
-            onClose={() => setWorkbenchOpen(false)}
-          />
-        </Suspense>
+        <AppErrorBoundary
+          variant="panel"
+          onClose={() => setWorkbenchOpen(false)}
+        >
+          <Suspense fallback={null}>
+            <ArtifactWorkbench
+              isOpen={workbenchOpen}
+              initialFileRef={workbenchFileRef}
+              currentWorkspaceUri={currentWorkspaceUri}
+              onClose={() => setWorkbenchOpen(false)}
+            />
+          </Suspense>
+        </AppErrorBoundary>
       )}
       {agentPanelOpen && !isSettingsPage && !isMultiAIPage && (
-        <Suspense fallback={null}>
-          <AgentMonitorPanel
-            isOpen={true}
-            conversationId={activeContextParent?.id ?? activeId}
-            activeId={activeId}
-            onClose={() => setAgentPanelOpen(false)}
-            onOpenConversation={(id) => {
-              setOptimisticMessages([]);
-              navigate(chatUrl(id));
-              if (isMobile()) setSidebarOpen(false);
-            }}
-          />
-        </Suspense>
+        <AppErrorBoundary
+          variant="panel"
+          onClose={() => setAgentPanelOpen(false)}
+        >
+          <Suspense fallback={null}>
+            <AgentMonitorPanel
+              isOpen={true}
+              conversationId={activeContextParent?.id ?? activeId}
+              activeId={activeId}
+              onClose={() => setAgentPanelOpen(false)}
+              onOpenConversation={(id) => {
+                setOptimisticMessages([]);
+                navigate(chatUrl(id));
+                if (isMobile()) setSidebarOpen(false);
+              }}
+            />
+          </Suspense>
+        </AppErrorBoundary>
       )}
       {paletteOpen && (
-        <Suspense fallback={null}>
-          <CommandPalette
+        <AppErrorBoundary
+          variant="panel"
+          onClose={() => setPaletteOpen(false)}
+        >
+          <Suspense fallback={null}>
+            <CommandPalette
             isOpen={paletteOpen}
             onClose={() => setPaletteOpen(false)}
             conversations={conversations}
@@ -1268,6 +1286,7 @@ function ChatView() {
             }}
           />
         </Suspense>
+        </AppErrorBoundary>
       )}
     </div>
   );

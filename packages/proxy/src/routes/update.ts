@@ -111,7 +111,7 @@ export function resolveCurrentAppVersion(): string {
       // 次の候補を確認
     }
   }
-  return "1.5.2";
+  return "1.5.3";
 }
 
 export function parseGitHubReleasePayload(

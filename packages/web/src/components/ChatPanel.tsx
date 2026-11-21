@@ -1135,11 +1135,34 @@ export function ChatPanel({
   const innerRef = useRef<HTMLDivElement>(null);
   const didInitialScroll = useRef(false);
   const isNearBottom = useRef(true);
+  const scrollingToBottomRef = useRef(false);
+  const scrollToBottomTimerRef = useRef<number | null>(null);
   const showScrollBtnRef = useRef(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const prevMsgCount = useRef(messages.length);
   const suppressScroll = useRef(false);
+
+  // 会話切替時・アンマウント時にスクロールボタン状態をリセット
+  useEffect(() => {
+    isNearBottom.current = true;
+    scrollingToBottomRef.current = false;
+    if (scrollToBottomTimerRef.current !== null) {
+      window.clearTimeout(scrollToBottomTimerRef.current);
+      scrollToBottomTimerRef.current = null;
+    }
+    showScrollBtnRef.current = false;
+    setShowScrollBtn(false);
+  }, [cascadeId]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollToBottomTimerRef.current !== null) {
+        window.clearTimeout(scrollToBottomTimerRef.current);
+        scrollToBottomTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Auto-scroll: on first render (instant) and when new messages arrive while near bottom
   useLayoutEffect(() => {
@@ -1169,6 +1192,16 @@ export function ChatPanel({
     const observer = new ResizeObserver(() => {
       if (didInitialScroll.current && isNearBottom.current && !suppressScroll.current) {
         scrollEl.scrollTop = scrollEl.scrollHeight;
+        return;
+      }
+      if (!suppressScroll.current && !scrollingToBottomRef.current) {
+        const distFromBottom =
+          scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+        const shouldShow = distFromBottom > 160;
+        if (shouldShow !== showScrollBtnRef.current) {
+          showScrollBtnRef.current = shouldShow;
+          setShowScrollBtn(shouldShow);
+        }
       }
     });
 
@@ -1188,8 +1221,29 @@ export function ChatPanel({
     const scrollingUp = el.scrollTop < prevTop - 2;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
 
+    // 一番下へジャンプ中のスムーズスクロールは途中フレームでボタンを再表示しない
+    if (scrollingToBottomRef.current) {
+      if (scrollingUp) {
+        scrollingToBottomRef.current = false;
+        if (scrollToBottomTimerRef.current !== null) {
+          window.clearTimeout(scrollToBottomTimerRef.current);
+          scrollToBottomTimerRef.current = null;
+        }
+      } else {
+        if (distFromBottom < 24) {
+          scrollingToBottomRef.current = false;
+          isNearBottom.current = true;
+          if (scrollToBottomTimerRef.current !== null) {
+            window.clearTimeout(scrollToBottomTimerRef.current);
+            scrollToBottomTimerRef.current = null;
+          }
+        }
+        return;
+      }
+    }
+
     // Only trigger re-render when the button visibility actually changes
-    const shouldShow = distFromBottom > 200;
+    const shouldShow = distFromBottom > 160;
     if (shouldShow !== showScrollBtnRef.current) {
       showScrollBtnRef.current = shouldShow;
       setShowScrollBtn(shouldShow);
@@ -1231,11 +1285,35 @@ export function ChatPanel({
   }, [hasMore, loadingOlder, loadOlder]);
 
   const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
     isNearBottom.current = true;
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    scrollingToBottomRef.current = true;
+    showScrollBtnRef.current = false;
+    setShowScrollBtn(false);
+
+    if (scrollToBottomTimerRef.current !== null) {
+      window.clearTimeout(scrollToBottomTimerRef.current);
+    }
+
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: "smooth",
+      });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // ストリーミング中などで高さが伸びた場合も確実に最新最下部へ着地させる
+    scrollToBottomTimerRef.current = window.setTimeout(() => {
+      scrollToBottomTimerRef.current = null;
+      if (scrollingToBottomRef.current && scrollRef.current) {
+        scrollingToBottomRef.current = false;
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        isNearBottom.current = true;
+      }
+    }, 420);
   }, []);
 
   // Prevent infinite retry of broken images rendered from markdown.
@@ -1399,38 +1477,49 @@ export function ChatPanel({
   }
 
   return (
-    <div
-      className="chat-area"
-      ref={scrollRef}
-      onScroll={handleScroll}
-      onWheel={(e) => {
-        if (e.deltaY < 0) {
-          isNearBottom.current = false;
-        }
-      }}
-      onTouchStart={(e) => {
-        touchStartYRef.current = e.touches[0]?.clientY ?? null;
-      }}
-      onTouchMove={(e) => {
-        const y = e.touches[0]?.clientY;
-        if (
-          typeof y === "number" &&
-          touchStartYRef.current !== null &&
-          y > touchStartYRef.current + 6
-        ) {
-          // 指を下にドラッグ＝チャットを上にスクロール中なので自動追従を即解除
-          isNearBottom.current = false;
-        }
-        // Dismiss iOS keyboard when scrolling chat area
-        const el = document.activeElement;
-        if (
-          el instanceof HTMLTextAreaElement ||
-          el instanceof HTMLInputElement
-        ) {
-          el.blur();
-        }
-      }}
-    >
+    <div className="chat-panel-viewport">
+      <div
+        className="chat-area"
+        ref={scrollRef}
+        onScroll={handleScroll}
+        onWheel={(e) => {
+          if (e.deltaY < 0) {
+            isNearBottom.current = false;
+            scrollingToBottomRef.current = false;
+            if (scrollToBottomTimerRef.current !== null) {
+              window.clearTimeout(scrollToBottomTimerRef.current);
+              scrollToBottomTimerRef.current = null;
+            }
+          }
+        }}
+        onTouchStart={(e) => {
+          touchStartYRef.current = e.touches[0]?.clientY ?? null;
+        }}
+        onTouchMove={(e) => {
+          const y = e.touches[0]?.clientY;
+          if (
+            typeof y === "number" &&
+            touchStartYRef.current !== null &&
+            y > touchStartYRef.current + 6
+          ) {
+            // 指を下にドラッグ＝チャットを上にスクロール中なので自動追従を即解除
+            isNearBottom.current = false;
+            scrollingToBottomRef.current = false;
+            if (scrollToBottomTimerRef.current !== null) {
+              window.clearTimeout(scrollToBottomTimerRef.current);
+              scrollToBottomTimerRef.current = null;
+            }
+          }
+          // Dismiss iOS keyboard when scrolling chat area
+          const el = document.activeElement;
+          if (
+            el instanceof HTMLTextAreaElement ||
+            el instanceof HTMLInputElement
+          ) {
+            el.blur();
+          }
+        }}
+      >
       <div className="chat-area-inner" ref={innerRef} onClick={handleImgClick}>
         {loadingOlder && (
           <div className="loading-older">
@@ -1532,13 +1621,30 @@ export function ChatPanel({
           </div>
         )}
       </div>
+      </div>
       {showScrollBtn && (
         <button
+          type="button"
           className="scroll-to-bottom-btn"
+          data-testid="scroll-to-bottom-btn"
           onClick={scrollToBottom}
           aria-label="一番下へスクロール"
+          title="一番下（最新）へ移動"
         >
-          ↓
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14" />
+            <path d="m19 12-7 7-7-7" />
+          </svg>
         </button>
       )}
       {lightboxSrc &&

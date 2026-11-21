@@ -101,10 +101,10 @@ export function AgentMonitorPanel({
 
   if (!isOpen) return null;
 
-  const subagents = data?.subagents ?? [];
-  const tasks = data?.tasks ?? [];
-  const runningSubagents = data?.counts.runningSubagents ?? 0;
-  const activeTasks = data?.counts.activeTasks ?? 0;
+  const subagents = Array.isArray(data?.subagents) ? data.subagents : [];
+  const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+  const runningSubagents = data?.counts?.runningSubagents ?? 0;
+  const activeTasks = data?.counts?.activeTasks ?? 0;
 
   const showAgents = tab === "all" || tab === "agents";
   const showTasks = tab === "all" || tab === "tasks";
