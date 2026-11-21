@@ -665,8 +665,8 @@ describe("Sidebar", () => {
 
     // Chat ⋯ menu exposes 🌿 枝分かれ right alongside rename & pin
     fireEvent.click(screen.getByTitle("メニュー"));
-    expect(screen.getByText("✏️ 名前を変更")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("🌿 枝分かれ"));
+    expect(screen.getByText("名前を変更")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("枝分かれ"));
     expect(onBranchSideChat).toHaveBeenCalledWith(
       expect.objectContaining({ id: "conv-agent-tree" }),
     );
@@ -717,7 +717,7 @@ describe("Sidebar", () => {
 
     // Open chat menu -> プロジェクトに追加・移動 -> select 開発ノート
     fireEvent.click(screen.getByTitle("メニュー"));
-    fireEvent.click(screen.getByText("📁 プロジェクトに追加・移動"));
+    fireEvent.click(screen.getByText("プロジェクトに追加・移動"));
     const moveTargets = screen.getAllByRole("button", { name: /開発ノート/ });
     fireEvent.click(moveTargets[moveTargets.length - 1]);
     expect(api.assignConversationProject).toHaveBeenCalledWith(

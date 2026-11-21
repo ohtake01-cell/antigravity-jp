@@ -8,6 +8,12 @@
 import { useState, useEffect, useCallback } from "react";
 import type { AppIconPreset, ClientSettings } from "../types";
 import { DEFAULT_MODEL } from "../constants";
+import {
+  DEFAULT_THEME_MODE,
+  applyThemeToDocument,
+  normalizeThemeMode,
+  subscribeSystemThemeChange,
+} from "../utils/theme";
 
 const STORAGE_KEY = "porta:settings";
 
@@ -36,6 +42,7 @@ const DEFAULT_SETTINGS: ClientSettings = {
   targetApp: "all",
   appTier: "lite",
   appIconPreset: DEFAULT_APP_ICON_PRESET,
+  themeMode: DEFAULT_THEME_MODE,
 };
 
 function readSettings(): ClientSettings {
@@ -65,6 +72,15 @@ function writeSettings(settings: ClientSettings): void {
 
 export function useClientSettings() {
   const [settings, setSettings] = useState<ClientSettings>(readSettings);
+
+  // 外観テーマを DOM・OS 自動追従・Mac ネイティブへ同期
+  useEffect(() => {
+    const mode = normalizeThemeMode(settings.themeMode);
+    applyThemeToDocument(mode);
+    return subscribeSystemThemeChange(mode, () => {
+      applyThemeToDocument(mode);
+    });
+  }, [settings.themeMode]);
 
   // Listen for cross-tab storage events
   useEffect(() => {

@@ -383,6 +383,7 @@ export function SettingsPanel({
       browserNotificationsEnabled: false,
       targetApp: "all",
       appIconPreset: DEFAULT_APP_ICON_PRESET,
+      themeMode: "dark",
     });
     flashSaved("初期値に戻しました");
   }, [onUpdate, flashSaved]);
@@ -532,6 +533,48 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {/* ── 外観テーマ（ダーク / ライト / 自動） ── */}
+        <div className="settings-section" data-testid="theme-mode-section">
+          <h2 className="settings-section-title">🎨 外観テーマ</h2>
+          <p className="settings-archive-desc">
+            画面の明るさを「ダーク」「ライト」「自動（Mac / OS の設定に連動）」から切り替えられます。
+          </p>
+          <div
+            className="theme-mode-selector"
+            role="radiogroup"
+            aria-label="外観テーマ切替"
+          >
+            {(
+              [
+                { id: "dark", icon: "🌙", label: "ダーク", sub: "目に優しい暗色" },
+                { id: "light", icon: "☀️", label: "ライト", sub: "明るい白基調" },
+                { id: "auto", icon: "🖥️", label: "自動", sub: "OS設定に連動" },
+              ] as const
+            ).map((opt) => {
+              const active = (settings.themeMode ?? "dark") === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={`theme-mode-btn ${active ? "active" : ""}`}
+                  onClick={() => {
+                    onUpdate({ themeMode: opt.id });
+                    flashSaved(`テーマを「${opt.label}」に変更しました`);
+                  }}
+                >
+                  <span className="theme-mode-icon" aria-hidden="true">
+                    {opt.icon}
+                  </span>
+                  <span>{opt.label}</span>
+                  <span className="theme-mode-sub">{opt.sub}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* ── 拡張機能・カスタマイズ管理（メモリ / MCP / スキル / プラグイン / ルール） ── */}
         <ExtensionsPanel />

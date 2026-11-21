@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { ConversationEntry } from "../hooks/useConversations";
 import { getAppIconUrl } from "../hooks/useClientSettings";
@@ -250,10 +250,147 @@ export function formatCompactModelBadge(
   return { text: fullLabel, provider, fullLabel };
 }
 
-/** Desktop-equivalent context menu (Rename / Pin / Move to Project / Branch / Archive / Delete) */
+type MenuGlyphName =
+  | "rename"
+  | "pin"
+  | "archive"
+  | "folder"
+  | "branch"
+  | "split"
+  | "copy"
+  | "plugins"
+  | "trash"
+  | "id"
+  | "markdown"
+  | "download";
+
+function MenuGlyph({ name }: { name: MenuGlyphName }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.75,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+  let path: React.ReactNode = null;
+  switch (name) {
+    case "rename":
+      path = (
+        <>
+          <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+          <path d="m15 5 4 4" />
+        </>
+      );
+      break;
+    case "pin":
+      path = (
+        <>
+          <path d="M12 17v5" />
+          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+        </>
+      );
+      break;
+    case "archive":
+      path = (
+        <>
+          <rect width="20" height="5" x="2" y="3" rx="1" />
+          <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+          <path d="M10 12h4" />
+        </>
+      );
+      break;
+    case "folder":
+      path = (
+        <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+      );
+      break;
+    case "branch":
+      path = (
+        <>
+          <line x1="6" x2="6" y1="3" y2="15" />
+          <circle cx="18" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <path d="M18 9a9 9 0 0 1-9 9" />
+        </>
+      );
+      break;
+    case "split":
+      path = (
+        <>
+          <rect width="18" height="18" x="3" y="3" rx="2" />
+          <path d="M12 3v18" />
+        </>
+      );
+      break;
+    case "copy":
+      path = (
+        <>
+          <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </>
+      );
+      break;
+    case "plugins":
+      path = (
+        <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z" />
+      );
+      break;
+    case "trash":
+      path = (
+        <>
+          <path d="M3 6h18" />
+          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        </>
+      );
+      break;
+    case "id":
+      path = (
+        <>
+          <line x1="4" x2="20" y1="9" y2="9" />
+          <line x1="4" x2="20" y1="15" y2="15" />
+          <line x1="10" x2="8" y1="3" y2="21" />
+          <line x1="16" x2="14" y1="3" y2="21" />
+        </>
+      );
+      break;
+    case "markdown":
+      path = (
+        <>
+          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+          <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+          <path d="M10 9H8" />
+          <path d="M16 13H8" />
+          <path d="M16 17H8" />
+        </>
+      );
+      break;
+    case "download":
+      path = (
+        <>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" x2="12" y1="15" y2="3" />
+        </>
+      );
+      break;
+  }
+  return (
+    <span className="context-menu-glyph">
+      <svg {...common}>{path}</svg>
+    </span>
+  );
+}
+
+/** Desktop-equivalent context menu (Rename / Pin / Archive / Project / Branch / Split / Copy / Plugins / Delete) */
 function ContextMenu({
   title,
   isPinned,
+  anchorRect,
   projects,
   currentProjectId,
   hasManualProject,
@@ -273,6 +410,7 @@ function ContextMenu({
 }: {
   title: string;
   isPinned: boolean;
+  anchorRect?: { top: number; left: number; right: number; bottom: number } | null;
   projects?: ProjectEntry[];
   currentProjectId?: string;
   hasManualProject?: boolean;
@@ -294,6 +432,35 @@ function ContextMenu({
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [copyMenuOpen, setCopyMenuOpen] = useState(false);
 
+  const isPopover =
+    typeof window !== "undefined" &&
+    window.innerWidth > 768 &&
+    Boolean(anchorRect);
+
+  const popoverMetrics = useMemo(() => {
+    if (!isPopover || !anchorRect) {
+      return { style: undefined, flipSubmenuLeft: false };
+    }
+    const menuWidth = 232;
+    const estHeight = 336;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = anchorRect.right + 10;
+    if (left + menuWidth + 12 > vw) {
+      left = Math.max(12, anchorRect.left - menuWidth - 10);
+    }
+    let top = anchorRect.top - 6;
+    if (top + estHeight + 14 > vh) {
+      top = Math.max(12, vh - estHeight - 14);
+    }
+    if (top < 12) top = 12;
+    const flipSubmenuLeft = left + menuWidth + 230 > vw;
+    return {
+      style: { top: `${top}px`, left: `${left}px` } as CSSProperties,
+      flipSubmenuLeft,
+    };
+  }, [isPopover, anchorRect]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -305,10 +472,16 @@ function ContextMenu({
   }, [onClose]);
 
   const projectList = projects ?? [];
+  const closeSubmenus = () => {
+    if (isPopover) {
+      setProjectPickerOpen(false);
+      setCopyMenuOpen(false);
+    }
+  };
 
   const menuContent = (
     <div
-      className="context-menu-overlay"
+      className={`context-menu-overlay${isPopover ? " is-popover" : ""}`}
       onClick={(e) => {
         e.stopPropagation();
         if (e.target === e.currentTarget) onClose();
@@ -319,69 +492,107 @@ function ContextMenu({
     >
       <div
         ref={ref}
-        className="context-menu context-menu-sheet"
+        className={`context-menu ${isPopover ? "context-menu-popover" : "context-menu-sheet"}`}
+        style={popoverMetrics.style}
         role="dialog"
         aria-modal="true"
         aria-label={`${title}のメニュー`}
         onClick={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-        <div className="context-menu-header-row">
-          <div className="context-menu-header" title={title}>
-            {title}
+        {!isPopover && (
+          <div className="context-menu-header-row">
+            <div className="context-menu-header" title={title}>
+              {title}
+            </div>
+            <button
+              type="button"
+              className="context-menu-close-btn"
+              aria-label="メニューを閉じる"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+            >
+              ✕
+            </button>
           </div>
-          <button
-            type="button"
-            className="context-menu-close-btn"
-            aria-label="メニューを閉じる"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-          >
-            ✕
-          </button>
-        </div>
+        )}
         <button
           type="button"
           className="context-menu-item"
+          onMouseEnter={closeSubmenus}
           onClick={(e) => {
             e.stopPropagation();
             onRename();
             onClose();
           }}
         >
-          <span>✏️ 名前を変更</span>
+          <MenuGlyph name="rename" />
+          <span>名前を変更</span>
         </button>
         <button
           type="button"
           className="context-menu-item"
+          onMouseEnter={closeSubmenus}
           onClick={(e) => {
             e.stopPropagation();
             onTogglePin();
             onClose();
           }}
         >
-          <span>{isPinned ? "📌 ピン留めを解除" : "📌 ピン留め"}</span>
+          <MenuGlyph name="pin" />
+          <span>{isPinned ? "ピン留めを解除" : "ピン留め"}</span>
         </button>
+        <button
+          type="button"
+          className="context-menu-item"
+          onMouseEnter={closeSubmenus}
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive();
+            onClose();
+          }}
+        >
+          <MenuGlyph name="archive" />
+          <span>アーカイブへ移動</span>
+        </button>
+        <div className="context-menu-divider" />
         {onAssignProject && (
-          <div className="context-menu-project-section">
+          <div
+            className="context-menu-project-section"
+            onMouseEnter={() => {
+              if (isPopover) {
+                setProjectPickerOpen(true);
+                setCopyMenuOpen(false);
+              }
+            }}
+          >
             <button
               type="button"
               className={`context-menu-item ${projectPickerOpen ? "expanded" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
-                setProjectPickerOpen((v) => !v);
+                setProjectPickerOpen((v) => {
+                  const next = !v;
+                  if (next) setCopyMenuOpen(false);
+                  return next;
+                });
               }}
             >
-              <span>📁 プロジェクトに追加・移動</span>
+              <MenuGlyph name="folder" />
+              <span>プロジェクトに追加・移動</span>
               <span className="context-menu-caret">
-                {projectPickerOpen ? "▴" : "▾"}
+                {isPopover ? "›" : projectPickerOpen ? "▴" : "▾"}
               </span>
             </button>
             {projectPickerOpen && (
               <div
-                className="context-menu-project-list"
+                className={
+                  isPopover
+                    ? `context-menu-flyout${popoverMetrics.flipSubmenuLeft ? " flip-left" : ""}`
+                    : "context-menu-project-list"
+                }
                 role="group"
                 aria-label="移動先プロジェクトを選択"
               >
@@ -423,7 +634,7 @@ function ContextMenu({
                       onClose();
                     }}
                   >
-                    <span>↩ プロジェクトから外す</span>
+                    <span>プロジェクトから外す</span>
                   </button>
                 )}
                 {onOpenAddProject && (
@@ -447,45 +658,70 @@ function ContextMenu({
           <button
             type="button"
             className="context-menu-item"
+            onMouseEnter={closeSubmenus}
             onClick={(e) => {
               e.stopPropagation();
               onBranchSideChat();
               onClose();
             }}
           >
-            <span>🌿 枝分かれ</span>
+            <MenuGlyph name="branch" />
+            <span>枝分かれ</span>
           </button>
         )}
         {onSplitOpen && (
           <button
             type="button"
             className="context-menu-item"
+            onMouseEnter={closeSubmenus}
             onClick={(e) => {
               e.stopPropagation();
               onSplitOpen();
               onClose();
             }}
           >
-            <span>🪟 分割して別画面で開く</span>
+            <MenuGlyph name="split" />
+            <span>分割して別画面で開く</span>
           </button>
         )}
+        <div className="context-menu-divider" />
         {(onCopyId || onCopyMarkdown || onDownloadMarkdown) && (
-          <div className="context-menu-project-section">
+          <div
+            className="context-menu-project-section"
+            onMouseEnter={() => {
+              if (isPopover) {
+                setCopyMenuOpen(true);
+                setProjectPickerOpen(false);
+              }
+            }}
+          >
             <button
               type="button"
               className={`context-menu-item ${copyMenuOpen ? "expanded" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
-                setCopyMenuOpen((v) => !v);
+                setCopyMenuOpen((v) => {
+                  const next = !v;
+                  if (next) setProjectPickerOpen(false);
+                  return next;
+                });
               }}
             >
-              <span>📋 コピー・書き出し</span>
+              <MenuGlyph name="copy" />
+              <span>コピー・書き出し</span>
               <span className="context-menu-caret">
-                {copyMenuOpen ? "▴" : "▾"}
+                {isPopover ? "›" : copyMenuOpen ? "▴" : "▾"}
               </span>
             </button>
             {copyMenuOpen && (
-              <div className="context-menu-project-list" role="group">
+              <div
+                className={
+                  isPopover
+                    ? `context-menu-flyout${popoverMetrics.flipSubmenuLeft ? " flip-left" : ""}`
+                    : "context-menu-project-list"
+                }
+                role="group"
+              >
                 {onCopyId && (
                   <button
                     type="button"
@@ -496,7 +732,8 @@ function ContextMenu({
                       onClose();
                     }}
                   >
-                    <span>🔑 チャット ID をコピー</span>
+                    <MenuGlyph name="id" />
+                    <span>チャット ID をコピー</span>
                   </button>
                 )}
                 {onCopyMarkdown && (
@@ -509,7 +746,8 @@ function ContextMenu({
                       onClose();
                     }}
                   >
-                    <span>📄 会話を Markdown コピー</span>
+                    <MenuGlyph name="markdown" />
+                    <span>会話を Markdown コピー</span>
                   </button>
                 )}
                 {onDownloadMarkdown && (
@@ -522,7 +760,8 @@ function ContextMenu({
                       onClose();
                     }}
                   >
-                    <span>💾 Markdown (.md) 保存</span>
+                    <MenuGlyph name="download" />
+                    <span>Markdown (.md) 保存</span>
                   </button>
                 )}
               </div>
@@ -533,37 +772,30 @@ function ContextMenu({
           <button
             type="button"
             className="context-menu-item"
+            onMouseEnter={closeSubmenus}
             onClick={(e) => {
               e.stopPropagation();
               onOpenPlugins();
               onClose();
             }}
           >
-            <span>🧩 プラグイン・MCP・スキル</span>
+            <MenuGlyph name="plugins" />
+            <span>プラグイン・MCP・スキル</span>
           </button>
         )}
-        <button
-          type="button"
-          className="context-menu-item"
-          onClick={(e) => {
-            e.stopPropagation();
-            onArchive();
-            onClose();
-          }}
-        >
-          <span>📦 アーカイブへ移動</span>
-        </button>
         <div className="context-menu-divider" />
         <button
           type="button"
           className="context-menu-item danger"
+          onMouseEnter={closeSubmenus}
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
             onClose();
           }}
         >
-          <span>🗑️ 削除</span>
+          <MenuGlyph name="trash" />
+          <span>削除</span>
         </button>
       </div>
     </div>
@@ -609,6 +841,12 @@ export function Sidebar({
     Record<string, boolean>
   >({});
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [menuAnchorRect, setMenuAnchorRect] = useState<{
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+  } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [localTitleOverrides, setLocalTitleOverrides] = useState<
@@ -971,7 +1209,10 @@ export function Sidebar({
   const longPressTriggeredRef = useRef(false);
   const touchStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const closeMenu = useCallback(() => setMenuOpen(null), []);
+  const closeMenu = useCallback(() => {
+    setMenuOpen(null);
+    setMenuAnchorRect(null);
+  }, []);
 
   const handleStartRename = useCallback(
     (conv: ConversationEntry) => {
@@ -1704,7 +1945,18 @@ export function Sidebar({
               className="sidebar-item-menu-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuOpen(menuOpen === itemKey ? null : itemKey);
+                if (menuOpen === itemKey) {
+                  setMenuOpen(null);
+                  setMenuAnchorRect(null);
+                } else {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setMenuAnchorRect(
+                    r.width > 0 || r.height > 0
+                      ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom }
+                      : null,
+                  );
+                  setMenuOpen(itemKey);
+                }
               }}
               title="メニュー"
             >
@@ -1714,6 +1966,7 @@ export function Sidebar({
               <ContextMenu
                 title={displayTitle}
                 isPinned={isPinned}
+                anchorRect={menuAnchorRect}
                 projects={projects}
                 currentProjectId={matchedProject?.id}
                 hasManualProject={hasManualProject}

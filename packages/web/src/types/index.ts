@@ -487,6 +487,8 @@ export interface MultiAISession {
   messages: MultiAIMessage[];
 }
 
+export type ThemeMode = "dark" | "light" | "auto";
+
 export interface ClientSettings {
   /** Model ID used when the user hasn't explicitly picked one per-message. */
   defaultModel: string | null;
@@ -504,6 +506,8 @@ export interface ClientSettings {
   appTier?: AppTier;
   /** User-selected app icon preset. */
   appIconPreset?: AppIconPreset;
+  /** Appearance theme mode: dark, light, or auto (follows OS). */
+  themeMode?: ThemeMode;
 }
 
 export interface AgentWeeklyBucket {

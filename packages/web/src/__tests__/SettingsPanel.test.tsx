@@ -1,5 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { api } from "../api/client";
@@ -104,10 +103,12 @@ describe("SettingsPanel", () => {
       expect(screen.getByText("古い設計メモ")).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "取り出す" }));
+    fireEvent.click(screen.getByText("取り出す"));
 
-    expect(mockedApi.updateAnnotations).toHaveBeenCalledWith("conv-arch-1", {
-      archived: false,
+    await waitFor(() => {
+      expect(mockedApi.updateAnnotations).toHaveBeenCalledWith("conv-arch-1", {
+        archived: false,
+      });
     });
     expect(onRefresh).toHaveBeenCalledTimes(1);
     await waitFor(() => {
@@ -144,5 +145,22 @@ describe("SettingsPanel", () => {
         defaultModel: "MODEL_PLACEHOLDER_M532",
       });
     });
+  });
+
+  it("switches theme mode between ダーク / ライト / 自動", () => {
+    const onUpdate = vi.fn();
+    render(
+      <SettingsPanel
+        settings={{ ...baseSettings, themeMode: "dark" }}
+        onUpdate={onUpdate}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /ライト/ }));
+    expect(onUpdate).toHaveBeenCalledWith({ themeMode: "light" });
+
+    fireEvent.click(screen.getByRole("radio", { name: /自動/ }));
+    expect(onUpdate).toHaveBeenCalledWith({ themeMode: "auto" });
   });
 });

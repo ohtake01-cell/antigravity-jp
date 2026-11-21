@@ -24,6 +24,24 @@
     <link rel="manifest" href="%BASE_URL%manifest.json" crossorigin="use-credentials" />
     <title>Antigravity 日本語版</title>
     <meta name="description" content="Antigravity 日本語版 — Mac ネイティブ対応 日本語 AI 開発アプリ" />
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("porta:settings");
+          var mode = raw ? JSON.parse(raw).themeMode : "dark";
+          var eff =
+            mode === "light" ||
+            (mode === "auto" &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: light)").matches)
+              ? "light"
+              : "dark";
+          document.documentElement.dataset.theme = eff;
+          document.documentElement.dataset.themeMode = mode || "dark";
+          document.documentElement.style.colorScheme = eff;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

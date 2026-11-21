@@ -19,7 +19,7 @@ private func currentAppVersion() -> String {
     if let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !ver.isEmpty {
         return ver.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    return "1.5.1"
+    return "1.5.2"
 }
 
 private func parseSemver(_ raw: String) -> [Int] {
@@ -510,7 +510,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.minSize = NSSize(width: 420, height: 520)
         window.center()
         window.setFrameAutosaveName("AntigravityJPMainWindow")
-        window.backgroundColor = NSColor(red: 0.051, green: 0.059, blue: 0.075, alpha: 1.0)
+        let savedTheme = UserDefaults.standard.string(forKey: "AGJPThemeMode") ?? "dark"
+        applyNativeTheme(mode: savedTheme)
 
         let wkConfig = WKWebViewConfiguration()
         wkConfig.preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -520,6 +521,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             guard let self else { return }
             guard let type = payload["type"] as? String else { return }
             switch type {
+            case "set-theme":
+                if let mode = payload["mode"] as? String {
+                    UserDefaults.standard.set(mode, forKey: "AGJPThemeMode")
+                    self.applyNativeTheme(mode: mode)
+                }
             case "copy":
                 if let text = payload["text"] as? String {
                     let pb = NSPasteboard.general
@@ -576,6 +582,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.contentView?.addSubview(webView)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func applyNativeTheme(mode: String) {
+        if mode == "light" {
+            NSApp.appearance = NSAppearance(named: .aqua)
+            window?.backgroundColor = NSColor(red: 0.973, green: 0.980, blue: 0.988, alpha: 1.0)
+        } else if mode == "auto" {
+            NSApp.appearance = nil
+            let isLight = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            window?.backgroundColor = isLight
+                ? NSColor(red: 0.973, green: 0.980, blue: 0.988, alpha: 1.0)
+                : NSColor(red: 0.051, green: 0.059, blue: 0.075, alpha: 1.0)
+        } else {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            window?.backgroundColor = NSColor(red: 0.051, green: 0.059, blue: 0.075, alpha: 1.0)
+        }
     }
 
     // MARK: - Native Menu Bar (Japanese)
