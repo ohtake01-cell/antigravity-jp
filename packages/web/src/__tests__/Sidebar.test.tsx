@@ -718,4 +718,78 @@ describe("Sidebar", () => {
 
     confirmSpy.mockRestore();
   });
+
+  it("renders pinned or running project chats only once in the sidebar without duplicating under the project group", async () => {
+    const { api } = await import("../api/client");
+    vi.mocked(api.projects).mockResolvedValueOnce({
+      projects: [
+        {
+          id: "proj-dev",
+          name: "アプリ開発",
+          folderUri: "file:///workspace/app",
+          folderPath: "/workspace/app",
+        },
+      ],
+    });
+
+    const conversations: ConversationEntry[] = [
+      {
+        id: "conv-pinned-in-proj",
+        summary: {
+          summary: "ピン留め済みプロジェクトチャット",
+          stepCount: 12,
+          status: "CASCADE_RUN_STATUS_IDLE",
+          lastModifiedTime: "2026-11-21T02:00:00.000Z",
+          createdTime: "2026-11-21T01:00:00.000Z",
+          trajectoryId: "t-pin-proj",
+          workspaces: [{ workspaceFolderAbsoluteUri: "file:///workspace/app" }],
+          annotations: { pinned: true },
+        },
+      },
+      {
+        id: "conv-running-in-proj",
+        summary: {
+          summary: "実行中プロジェクトチャット",
+          stepCount: 5,
+          status: "CASCADE_RUN_STATUS_RUNNING",
+          lastModifiedTime: "2026-11-21T02:05:00.000Z",
+          createdTime: "2026-11-21T01:30:00.000Z",
+          trajectoryId: "t-run-proj",
+          workspaces: [{ workspaceFolderAbsoluteUri: "file:///workspace/app" }],
+        },
+      },
+      {
+        id: "conv-normal-in-proj",
+        summary: {
+          summary: "通常プロジェクトチャット",
+          stepCount: 3,
+          status: "CASCADE_RUN_STATUS_IDLE",
+          lastModifiedTime: "2026-11-21T01:40:00.000Z",
+          createdTime: "2026-11-21T01:20:00.000Z",
+          trajectoryId: "t-norm-proj",
+          workspaces: [{ workspaceFolderAbsoluteUri: "file:///workspace/app" }],
+        },
+      },
+    ];
+
+    render(
+      <Sidebar
+        conversations={conversations}
+        activeId="conv-pinned-in-proj"
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onSettings={vi.fn()}
+        loading={false}
+        connected={true}
+        isOpen={true}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("アプリ開発")).toBeInTheDocument();
+    expect(screen.getAllByText("ピン留め済みプロジェクトチャット")).toHaveLength(1);
+    expect(screen.getAllByText("実行中プロジェクトチャット")).toHaveLength(1);
+    expect(screen.getAllByText("通常プロジェクトチャット")).toHaveLength(1);
+  });
 });

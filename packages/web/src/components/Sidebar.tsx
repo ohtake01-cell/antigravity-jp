@@ -45,6 +45,8 @@ interface WorkspaceGroup {
   isPinnedSection?: boolean;
   project?: ProjectEntry;
   conversations: ConversationEntry[];
+  /** ピン留め・実行中セクションへ移動済みの分も含む全所属チャットID（パス変更時の保護用） */
+  allConversationIds?: string[];
   hasRunning: boolean;
 }
 
@@ -1038,10 +1040,12 @@ export function Sidebar({
     const runningList: ConversationEntry[] = [];
     const pinnedList: ConversationEntry[] = [];
     const projectMap = new Map<string, ConversationEntry[]>();
+    const projectAllIdsMap = new Map<string, string[]>();
     const workspaceMap = new Map<string, ConversationEntry[]>();
 
     for (const proj of projects) {
       projectMap.set(proj.id, []);
+      projectAllIdsMap.set(proj.id, []);
     }
 
     for (const conv of conversations) {
@@ -1076,19 +1080,24 @@ export function Sidebar({
         localPinnedOverrides[conv.id] ??
         conv.summary.annotations?.pinned === true;
 
+      // パス変更時の所属保護のため、実行中・ピン留め分も含めて所属プロジェクトID一覧を記録
+      const matchedProj = matchConversationProject(conv);
+      if (matchedProj) {
+        const allIds = projectAllIdsMap.get(matchedProj.id) ?? [];
+        allIds.push(conv.id);
+        projectAllIdsMap.set(matchedProj.id, allIds);
+      }
+
+      // 1チャット＝サイドバー上では常に1箇所だけ表示（優先順位: 実行中 > ピン留め > プロジェクト > その他）
       if (isRunning) {
         runningList.push(conv);
       } else if (isPinned) {
         pinnedList.push(conv);
-      }
-
-      // プロジェクトに所属するチャットは実行中・ピン留め中でも必ずプロジェクト配下に表示する
-      const matchedProj = matchConversationProject(conv);
-      if (matchedProj) {
+      } else if (matchedProj) {
         const list = projectMap.get(matchedProj.id) ?? [];
         list.push(conv);
         projectMap.set(matchedProj.id, list);
-      } else if (!isRunning && !isPinned) {
+      } else {
         const name = extractWorkspaceName(conv);
         const list = workspaceMap.get(name) ?? [];
         list.push(conv);
@@ -1144,7 +1153,8 @@ export function Sidebar({
     const projectGroups: WorkspaceGroup[] = [];
     for (const proj of projects) {
       const convs = projectMap.get(proj.id) ?? [];
-      if (hideEmptyProjects && convs.length === 0) continue;
+      const allIds = projectAllIdsMap.get(proj.id) ?? [];
+      if (hideEmptyProjects && allIds.length === 0) continue;
       convs.sort((a, b) => {
         const aRunning = isConvRunning(a);
         const bRunning = isConvRunning(b);
@@ -1158,6 +1168,7 @@ export function Sidebar({
         name: proj.name,
         project: proj,
         conversations: convs,
+        allConversationIds: allIds,
         hasRunning: convs.some((c) => isConvRunning(c)),
       });
     }
@@ -2321,7 +2332,8 @@ export function Sidebar({
                           void handleSaveEditProject(
                             e,
                             proj.id,
-                            group.conversations.map((c) => c.id),
+                            group.allConversationIds ??
+                              group.conversations.map((c) => c.id),
                           )
                         }
                         onClick={(e) => e.stopPropagation()}
