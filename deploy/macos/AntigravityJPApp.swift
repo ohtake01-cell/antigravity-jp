@@ -19,7 +19,7 @@ private func currentAppVersion() -> String {
     if let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !ver.isEmpty {
         return ver.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    return "1.5.3"
+    return "1.5.4"
 }
 
 private func parseSemver(_ raw: String) -> [Int] {

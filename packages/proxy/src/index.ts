@@ -29,6 +29,7 @@ import { registerJpRuleRoutes } from "./routes/jpRule.js";
 import { registerPermissionAndVoiceRoutes } from "./routes/permissions.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerExtensionRoutes } from "./routes/extensions.js";
+import { registerFeedbackRoutes } from "./routes/feedback.js";
 import {
   registerUpdateRoutes,
   resolveCurrentAppVersion,
@@ -102,6 +103,7 @@ registerJpRuleRoutes(app);
 registerPermissionAndVoiceRoutes(app);
 registerProviderRoutes(app);
 registerExtensionRoutes(app);
+registerFeedbackRoutes(app);
 registerUpdateRoutes(app);
 
 // ── ビルド済み Web UI の一体配信（単体起動モード） ──

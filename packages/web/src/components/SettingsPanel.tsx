@@ -22,6 +22,7 @@ import type {
 } from "../types";
 import type { PlannerType } from "./ChatInput";
 import { ExtensionsPanel } from "./ExtensionsPanel";
+import { FeedbackSection } from "./FeedbackSection";
 import {
   formatBytesMb,
   type AppUpdateState,
@@ -716,6 +717,9 @@ export function SettingsPanel({
             </div>
           </div>
         )}
+
+        {/* ── バグ報告・改善提案ボード ── */}
+        <FeedbackSection />
 
         {/* ── 日本語応答ルール ── */}
         <div className="settings-section">

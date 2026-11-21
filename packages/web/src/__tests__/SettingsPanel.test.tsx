@@ -10,6 +10,7 @@ vi.mock("../api/client", () => ({
     archivedConversations: vi.fn(),
     updateAnnotations: vi.fn(),
     extensionsOverview: vi.fn(),
+    feedbackList: vi.fn(),
   },
 }));
 
@@ -59,6 +60,14 @@ describe("SettingsPanel", () => {
         pluginsDir: "~/.gemini/config/plugins",
         rulesPath: "~/.gemini/config/GEMINI.md",
       },
+    });
+    mockedApi.feedbackList.mockResolvedValue({
+      ok: true,
+      items: [],
+      appVersion: "1.5.4",
+      platform: "darwin",
+      arch: "arm64",
+      issuesUrl: "https://github.com/ohtake01-cell/antigravity-jp/issues/new",
     });
   });
 

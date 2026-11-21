@@ -1931,9 +1931,9 @@ export function Sidebar({
                 style={
                   isActive
                     ? {
-                        color: "#34d399",
+                        color: "var(--tone-green-fg, #34d399)",
                         filter:
-                          "drop-shadow(0 0 6px rgba(52, 211, 153, 0.9))",
+                          "drop-shadow(0 0 6px var(--tone-green-glow, rgba(52, 211, 153, 0.9)))",
                       }
                     : undefined
                 }

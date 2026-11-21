@@ -281,10 +281,10 @@ export function WeeklyUsageBadge({
   const pillColor =
     gearRemPct !== null
       ? gearRemPct <= 15
-        ? "#ef5350"
+        ? "var(--tone-red-fg, #ef5350)"
         : gearRemPct <= 40
-          ? "#f59e0b"
-          : "#34d399"
+          ? "var(--tone-amber-fg, #f59e0b)"
+          : "var(--tone-green-fg, #34d399)"
       : undefined;
   const maxDay = Math.max(
     1,

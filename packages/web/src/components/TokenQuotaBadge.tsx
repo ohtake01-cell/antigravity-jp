@@ -66,10 +66,10 @@ export function TokenQuotaBadge({ inlineDetails = false }: TokenQuotaBadgeProps)
   const isLow = pct <= 20;
   const isWarn = pct <= 50 && pct > 20;
   const statusColor = isLow
-    ? "var(--status-error, #ef5350)"
+    ? "var(--tone-red-fg, var(--status-error, #ef5350))"
     : isWarn
-      ? "#f59e0b"
-      : "var(--c-gemini-sparkle, #4da3ff)";
+      ? "var(--tone-amber-fg, #f59e0b)"
+      : "var(--tone-blue-fg, var(--c-gemini-sparkle, #4da3ff))";
 
   // リセット時刻のフォーマット (例: "15:31" または "残り 2時間")
   const formatReset = (iso?: string) => {
@@ -92,7 +92,12 @@ export function TokenQuotaBadge({ inlineDetails = false }: TokenQuotaBadgeProps)
       <div className="token-quota-inline-list">
         {modelQuotas.map((m) => {
           const p = Math.round(m.remainingFraction * 100);
-          const color = p <= 20 ? "#ef5350" : p <= 50 ? "#f59e0b" : "#4da3ff";
+          const color =
+            p <= 20
+              ? "var(--tone-red-fg, #ef5350)"
+              : p <= 50
+                ? "var(--tone-amber-fg, #f59e0b)"
+                : "var(--tone-blue-fg, #4da3ff)";
           const reset = formatReset(m.resetTime);
           return (
             <div key={m.model} className="token-quota-inline-row">
@@ -158,7 +163,12 @@ export function TokenQuotaBadge({ inlineDetails = false }: TokenQuotaBadgeProps)
           <div className="token-quota-popover-list">
             {modelQuotas.map((m) => {
               const p = Math.round(m.remainingFraction * 100);
-              const color = p <= 20 ? "#ef5350" : p <= 50 ? "#f59e0b" : "#4da3ff";
+              const color =
+            p <= 20
+              ? "var(--tone-red-fg, #ef5350)"
+              : p <= 50
+                ? "var(--tone-amber-fg, #f59e0b)"
+                : "var(--tone-blue-fg, #4da3ff)";
               const reset = formatReset(m.resetTime);
               return (
                 <div key={m.model} className="token-quota-popover-item">

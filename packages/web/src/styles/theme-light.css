@@ -37,6 +37,38 @@
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
   --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.1);
   --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14);
+
+  /* ── High-Contrast Semantic Ink Tones (ライト背景で蛍光色にならない濃色トークン) ── */
+  --tone-blue-fg: #1d4ed8;
+  --tone-blue-bg: rgba(37, 99, 235, 0.12);
+  --tone-blue-border: rgba(37, 99, 235, 0.34);
+
+  --tone-green-fg: #047857;
+  --tone-green-bg: rgba(5, 150, 105, 0.12);
+  --tone-green-border: rgba(5, 150, 105, 0.34);
+  --tone-green-glow: rgba(5, 150, 105, 0.25);
+
+  --tone-teal-fg: #0f766e;
+  --tone-teal-bg: rgba(13, 148, 136, 0.12);
+  --tone-teal-border: rgba(13, 148, 136, 0.34);
+
+  --tone-purple-fg: #6d28d9;
+  --tone-purple-bg: rgba(124, 58, 237, 0.12);
+  --tone-purple-border: rgba(124, 58, 237, 0.34);
+
+  --tone-indigo-fg: #3730a3;
+  --tone-indigo-bg: rgba(67, 56, 202, 0.12);
+  --tone-indigo-border: rgba(67, 56, 202, 0.34);
+
+  --tone-amber-fg: #b45309;
+  --tone-amber-bg: rgba(217, 119, 6, 0.13);
+  --tone-amber-border: rgba(217, 119, 6, 0.38);
+
+  --tone-red-fg: #b91c1c;
+  --tone-red-bg: rgba(220, 38, 38, 0.1);
+  --tone-red-border: rgba(220, 38, 38, 0.34);
+
+  --quota-pill-bg: rgba(37, 99, 235, 0.1);
 }
 
 /* ── テーマ切替セグメントボタン（設定画面） ── */
@@ -325,4 +357,348 @@
   box-shadow:
     0 10px 26px rgba(15, 23, 42, 0.16),
     0 0 0 1px rgba(66, 99, 235, 0.14);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ライトモード蛍光色・低コントラスト全面補正（WCAG AA/AAA 視認性保証）
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root[data-theme="light"] .header-agent-count {
+  background: var(--tone-indigo-bg);
+  color: var(--tone-indigo-fg);
+  border-color: var(--tone-indigo-border);
+}
+
+:root[data-theme="light"] .header-agent-count.running {
+  background: var(--tone-green-bg);
+  color: var(--tone-green-fg);
+  border-color: var(--tone-green-border);
+}
+
+:root[data-theme="light"] .subagent-context-bar {
+  background: rgba(37, 99, 235, 0.05);
+  border-bottom-color: var(--border-subtle);
+}
+
+:root[data-theme="light"] .subagent-context-label {
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .subagent-context-back-btn,
+:root[data-theme="light"] .subagent-context-detail-btn {
+  background: var(--tone-indigo-bg);
+  border-color: var(--tone-indigo-border);
+  color: var(--tone-indigo-fg);
+}
+
+:root[data-theme="light"] .subagent-context-detail-btn:hover,
+:root[data-theme="light"] .subagent-context-back-btn:hover {
+  background: rgba(67, 56, 202, 0.18);
+  color: #1e1b4b;
+}
+
+:root[data-theme="light"] .subagent-context-chip {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: var(--text-secondary);
+}
+
+:root[data-theme="light"] .subagent-context-chip.active {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .subagent-context-chip.running {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .subagent-context-chip-type {
+  background: rgba(15, 23, 42, 0.07);
+  color: var(--text-secondary);
+}
+
+/* ── サイドバー：ピン留め・モデルバッジ・エージェントピル ── */
+:root[data-theme="light"] .pinned-group-header {
+  color: var(--tone-blue-fg) !important;
+}
+
+:root[data-theme="light"] .pinned-group-header .workspace-group-count {
+  background: var(--tone-blue-bg) !important;
+  color: var(--tone-blue-fg) !important;
+}
+
+:root[data-theme="light"] .running-group-header {
+  color: var(--tone-green-fg) !important;
+}
+
+:root[data-theme="light"] .sidebar-model-badge.provider-google {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .sidebar-model-badge.provider-anthropic {
+  background: var(--tone-amber-bg);
+  border-color: var(--tone-amber-border);
+  color: var(--tone-amber-fg);
+}
+
+:root[data-theme="light"] .sidebar-model-badge.provider-openai {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .sidebar-model-badge.provider-ollama {
+  background: var(--tone-purple-bg);
+  border-color: var(--tone-purple-border);
+  color: var(--tone-purple-fg);
+}
+
+:root[data-theme="light"] .sidebar-provider-pill.active {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .sidebar-provider-pill.provider-anthropic.active {
+  background: var(--tone-amber-bg);
+  border-color: var(--tone-amber-border);
+  color: var(--tone-amber-fg);
+}
+
+:root[data-theme="light"] .sidebar-provider-pill.provider-openai.active {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .sidebar-provider-pill.provider-ollama.active {
+  background: var(--tone-purple-bg);
+  border-color: var(--tone-purple-border);
+  color: var(--tone-purple-fg);
+}
+
+:root[data-theme="light"] .sidebar-subagents-toggle {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .sidebar-subagents-toggle:hover {
+  background: rgba(37, 99, 235, 0.18);
+  color: #1e3a8a;
+}
+
+:root[data-theme="light"] .sidebar-subagents-toggle.running,
+:root[data-theme="light"] .sidebar-subagent-item.running {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .sidebar-subagent-item.running .sidebar-subagent-title,
+:root[data-theme="light"] .sidebar-subagent-item.running .sidebar-subagent-meta,
+:root[data-theme="light"] .sidebar-running-status-label.active-chat,
+:root[data-theme="light"] .sidebar-running-spinner.active-chat,
+:root[data-theme="light"] .sidebar-title-blinking.active-chat {
+  color: var(--tone-green-fg) !important;
+}
+
+:root[data-theme="light"] .sidebar-running-status-label {
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .sidebar-project-row.active .sidebar-project-folder-icon,
+:root[data-theme="light"] .sidebar-agent-detail-link:hover {
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .sidebar-project-dropdown-item.danger,
+:root[data-theme="light"] .sidebar-project-error {
+  color: var(--tone-red-fg);
+}
+
+:root[data-theme="light"] .sidebar-toast {
+  background: #eff6ff;
+  border-color: var(--tone-blue-border);
+  color: #1e3a8a;
+}
+
+:root[data-theme="light"] .sidebar-toast.error {
+  background: #fef2f2;
+  border-color: var(--tone-red-border);
+  color: var(--tone-red-fg);
+}
+
+/* ── マルチAIハブ（multi-ai.css 蛍光色補正） ── */
+:root[data-theme="light"] .tier-card.active .tier-card-badge,
+:root[data-theme="light"] .provider-login-btn,
+:root[data-theme="light"] .provider-feedback-banner {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .provider-status-pill.ready {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .provider-status-pill.needs_login {
+  background: var(--tone-amber-bg);
+  border-color: var(--tone-amber-border);
+  color: var(--tone-amber-fg);
+}
+
+:root[data-theme="light"] .provider-cmd-code {
+  background: #eef2f7;
+  color: #0f172a;
+  border-color: var(--border-default);
+}
+
+:root[data-theme="light"] .provider-feedback-banner.error,
+:root[data-theme="light"] .multi-ai-msg.error {
+  background: var(--tone-red-bg);
+  border-color: var(--tone-red-border);
+  color: var(--tone-red-fg);
+}
+
+:root[data-theme="light"] .multi-ai-chip.active,
+:root[data-theme="light"] .multi-ai-mode-tab.active,
+:root[data-theme="light"] .multi-ai-compare-toggle.selected {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .multi-ai-mini-btn:hover,
+:root[data-theme="light"] .multi-ai-preset-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── ワークベンチ・エージェント監視パネル ── */
+:root[data-theme="light"] .wb-pane {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-left-color: var(--border-subtle);
+}
+
+:root[data-theme="light"] .wb-kind-badge,
+:root[data-theme="light"] .wb-mermaid-badge,
+:root[data-theme="light"] .agent-monitor-type-badge {
+  background: var(--tone-indigo-bg);
+  border-color: var(--tone-indigo-border);
+  color: var(--tone-indigo-fg);
+}
+
+:root[data-theme="light"] .wb-dirty-dot {
+  color: var(--tone-amber-fg);
+}
+
+:root[data-theme="light"] .wb-save-ok,
+:root[data-theme="light"] .wb-save-btn,
+:root[data-theme="light"] .agent-monitor-badge,
+:root[data-theme="light"] .agent-monitor-live-pill,
+:root[data-theme="light"] .agent-monitor-running-count,
+:root[data-theme="light"] .agent-monitor-state-pill.running {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .wb-save-ok,
+:root[data-theme="light"] .agent-monitor-running-count {
+  background: transparent;
+}
+
+:root[data-theme="light"] .agent-monitor-state-pill.alive,
+:root[data-theme="light"] .agent-monitor-open-btn {
+  background: var(--tone-blue-bg);
+  border-color: var(--tone-blue-border);
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .agent-monitor-open-btn:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.2);
+  color: #1e3a8a;
+}
+
+:root[data-theme="light"] .wb-error {
+  background: var(--tone-red-bg);
+  border-color: var(--tone-red-border);
+  color: var(--tone-red-fg);
+}
+
+:root[data-theme="light"] .wb-editor-textarea,
+:root[data-theme="light"] .wb-line-text,
+:root[data-theme="light"] .agent-monitor-task-log {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: var(--border-subtle);
+}
+
+/* ── コマンドパレット・設定・コンテキストメニュー・エラーカード ── */
+:root[data-theme="light"] .cmd-palette-search-icon,
+:root[data-theme="light"] .settings-archive-hint,
+:root[data-theme="light"] .settings-archive-msg.user .settings-archive-msg-role,
+:root[data-theme="light"] .context-menu-project-item.active,
+:root[data-theme="light"] .context-menu-project-item.add-new {
+  color: var(--tone-blue-fg);
+}
+
+:root[data-theme="light"] .cmd-palette-badge.tone-warn,
+:root[data-theme="light"] .context-menu-project-item.remove,
+:root[data-theme="light"] .connection-retry-banner,
+:root[data-theme="light"] .connection-retry-btn {
+  background: var(--tone-amber-bg);
+  border-color: var(--tone-amber-border);
+  color: var(--tone-amber-fg);
+}
+
+:root[data-theme="light"] .cmd-palette-badge.tone-live,
+:root[data-theme="light"] .ext-feedback.ok {
+  background: var(--tone-green-bg);
+  border-color: var(--tone-green-border);
+  color: var(--tone-green-fg);
+}
+
+:root[data-theme="light"] .cmd-palette-badge.tone-muted,
+:root[data-theme="light"] .cmd-palette-footer kbd {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+:root[data-theme="light"] .ext-feedback.error,
+:root[data-theme="light"] .settings-archive-btn.danger,
+:root[data-theme="light"] .msg-action-pill.danger:hover:not(:disabled),
+:root[data-theme="light"] .msg-action-pill.danger.confirming,
+:root[data-theme="light"] .step-card.error-card .step-card-icon,
+:root[data-theme="light"] .step-card.error-card .info-card-text {
+  color: var(--tone-red-fg);
+}
+
+:root[data-theme="light"] .mobile-sheet-pill.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .chat-audio-orb-btn.transcribing {
+  color: var(--tone-blue-fg);
+}
+
+@media (max-width: 768px) {
+  :root[data-theme="light"] .message-body,
+  :root[data-theme="light"] .message-body strong,
+  :root[data-theme="light"] .message-body h1,
+  :root[data-theme="light"] .message-body h2,
+  :root[data-theme="light"] .message-body h3 {
+    color: var(--text-primary);
+  }
 }

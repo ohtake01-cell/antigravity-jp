@@ -1152,4 +1152,70 @@ export const api = {
     request<import("../types").UpdateCheckResponse>(
       `/api/update/check${force ? "?force=1" : ""}`,
     ),
+
+  // ── Local Bug Report & Improvement Feedback Board ──
+
+  feedbackList: (params?: { status?: string; kind?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.kind) qs.set("kind", params.kind);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{
+      ok: boolean;
+      items: Array<{
+        id: string;
+        kind: "bug" | "improvement";
+        severity: "high" | "medium" | "low";
+        status: "open" | "in_progress" | "resolved";
+        source: "ai" | "user";
+        reporterName: string;
+        title: string;
+        detail: string;
+        appVersion: string;
+        resolutionNote?: string | null;
+        createdAt: string;
+        updatedAt: string;
+        resolvedAt?: string | null;
+      }>;
+      appVersion: string;
+      platform: string;
+      arch: string;
+      issuesUrl: string;
+    }>(`/api/feedback${suffix}`);
+  },
+
+  createFeedback: (payload: {
+    kind?: "bug" | "improvement";
+    severity?: "high" | "medium" | "low";
+    source?: "ai" | "user";
+    reporterName?: string;
+    title: string;
+    detail?: string;
+  }) =>
+    request<{ ok: boolean; item: any }>("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateFeedback: (
+    id: string,
+    payload: {
+      status?: "open" | "in_progress" | "resolved";
+      severity?: "high" | "medium" | "low";
+      resolutionNote?: string | null;
+    },
+  ) =>
+    request<{ ok: boolean; item: any }>(
+      `/api/feedback/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  deleteFeedback: (id: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/api/feedback/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
 };

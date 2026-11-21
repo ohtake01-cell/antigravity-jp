@@ -218,8 +218,8 @@ function renderNewBadge() {
         fontSize: "9.5px",
         padding: "0 4px",
         borderRadius: "4px",
-        background: "rgba(52, 211, 153, 0.16)",
-        color: "#34d399",
+        background: "var(--tone-green-bg, rgba(52, 211, 153, 0.16))",
+        color: "var(--tone-green-fg, #34d399)",
         fontWeight: 700,
       }}
     >
@@ -349,9 +349,12 @@ function renderModelMeta(m: ModelConfig) {
               borderRadius: "999px",
               background:
                 activeQuota <= 0.2
-                  ? "rgba(239, 83, 80, 0.2)"
-                  : "rgba(255, 255, 255, 0.08)",
-              color: activeQuota <= 0.2 ? "#ef5350" : "#93c5fd",
+                  ? "var(--tone-red-bg, rgba(239, 83, 80, 0.2))"
+                  : "var(--quota-pill-bg, rgba(255, 255, 255, 0.08))",
+              color:
+                activeQuota <= 0.2
+                  ? "var(--tone-red-fg, #ef5350)"
+                  : "var(--tone-blue-fg, #93c5fd)",
               fontWeight: 600,
               marginLeft: "4px",
               display: "inline-flex",
