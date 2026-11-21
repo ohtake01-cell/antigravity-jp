@@ -674,7 +674,22 @@ const MessageBubble = memo(
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState(msg.content);
     const [isSavingEdit, setIsSavingEdit] = useState(false);
+    const [longTextExpanded, setLongTextExpanded] = useState(false);
     const editInputRef = useRef<HTMLTextAreaElement>(null);
+
+    const contentLineCount = useMemo(
+      () => (msg.content ? msg.content.split(/\r?\n/).length : 0),
+      [msg.content],
+    );
+    const isLongUserMessage =
+      msg.role === "user" &&
+      (contentLineCount >= 10 || (msg.content?.length ?? 0) >= 500);
+    const isVeryLongAssistantMessage =
+      msg.role === "assistant" &&
+      (contentLineCount >= 40 || (msg.content?.length ?? 0) >= 2400);
+    const isCollapsibleLongMessage =
+      isLongUserMessage || isVeryLongAssistantMessage;
+    const isCollapsedLong = isCollapsibleLongMessage && !longTextExpanded;
 
     useEffect(() => {
       if (!confirmDelete) return;
@@ -826,7 +841,30 @@ const MessageBubble = memo(
               </div>
             </div>
           ) : (
-            msg.content && <MarkdownContent html={renderedContent} />
+            msg.content && (
+              <>
+                <div
+                  className={`msg-markdown-wrap${isCollapsedLong ? " is-collapsed-long" : ""}`}
+                >
+                  <MarkdownContent html={renderedContent} />
+                  {isCollapsedLong && (
+                    <div className="msg-long-fade" aria-hidden="true" />
+                  )}
+                </div>
+                {isCollapsibleLongMessage && (
+                  <button
+                    type="button"
+                    className="msg-long-toggle-btn"
+                    onClick={() => setLongTextExpanded((v) => !v)}
+                    data-testid="msg-long-toggle-btn"
+                  >
+                    {longTextExpanded
+                      ? "▲ 折りたたむ"
+                      : `▼ 全文を表示（${contentLineCount}行 · ${msg.content.length}文字）`}
+                  </button>
+                )}
+              </>
+            )
           )}
           {!isEditing && msg.content && (
             <div className="msg-actions">

@@ -19,7 +19,7 @@ private func currentAppVersion() -> String {
     if let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !ver.isEmpty {
         return ver.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    return "1.5.0"
+    return "1.5.1"
 }
 
 private func parseSemver(_ raw: String) -> [Int] {
@@ -447,7 +447,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
+        if window == nil {
+            setupWindow()
+            ensureServerAndLoad()
+        } else if !flag {
             window.makeKeyAndOrderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -503,6 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             defer: false
         )
         window.title = "Antigravity 日本語版"
+        window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 420, height: 520)
         window.center()
         window.setFrameAutosaveName("AntigravityJPMainWindow")
@@ -521,6 +525,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                     let pb = NSPasteboard.general
                     pb.clearContents()
                     pb.setString(text, forType: .string)
+                }
+            case "save-file":
+                if let content = payload["content"] as? String {
+                    let rawName = (payload["filename"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let panel = NSSavePanel()
+                    panel.nameFieldStringValue = (rawName?.isEmpty == false ? rawName! : "conversation.md")
+                    panel.canCreateDirectories = true
+                    let handleSave: (NSApplication.ModalResponse) -> Void = { response in
+                        if response == .OK, let dest = panel.url {
+                            try? content.write(to: dest, atomically: true, encoding: .utf8)
+                        }
+                    }
+                    if let win = self.window {
+                        panel.beginSheetModal(for: win, completionHandler: handleSave)
+                    } else {
+                        handleSave(panel.runModal())
+                    }
                 }
             case "notify":
                 let title = (payload["title"] as? String) ?? "Antigravity 日本語版"
@@ -711,19 +732,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     // MARK: - Local Bridge Server Auto-Management
 
-    private func checkHealth() async -> Bool {
+    private func checkHealth() async -> (healthy: Bool, version: String?) {
         let healthURL = config.baseURL.appendingPathComponent("api/health")
         var req = URLRequest(url: healthURL)
         req.timeoutInterval = 1.5
         do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: req)
             if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
-                return true
+                let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                let ver = obj?["version"] as? String
+                return (true, ver)
             }
         } catch {
-            return false
+            return (false, nil)
         }
-        return false
+        return (false, nil)
     }
 
     private func startManagedServerIfPossible() -> (ok: Bool, error: String?) {
@@ -796,9 +819,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         Task { @MainActor in
             defer { self.isLoadingServer = false }
 
-            if await self.checkHealth() {
-                self.webView.load(URLRequest(url: self.config.baseURL))
-                return
+            let expectedVer = currentAppVersion()
+            let initial = await self.checkHealth()
+            if initial.healthy {
+                if initial.version == expectedVer {
+                    self.webView.load(URLRequest(url: self.config.baseURL))
+                    return
+                }
+                // 古いバージョンのローカルサーバーがポートを占有している場合は自動で最新へ切り替える
+                self.stopManagedServer()
+                let portToClear = self.config.port
+                await Task.detached(priority: .userInitiated) {
+                    let res = runSubprocessSync("/usr/sbin/lsof", arguments: ["-nP", "-iTCP:\(portToClear)", "-sTCP:LISTEN", "-t"])
+                    if res.status == 0 {
+                        let myPid = ProcessInfo.processInfo.processIdentifier
+                        for raw in res.output.components(separatedBy: .newlines) {
+                            if let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0, pid != myPid {
+                                kill(pid, SIGTERM)
+                            }
+                        }
+                    }
+                }.value
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
 
             let started = self.startManagedServerIfPossible()
@@ -812,7 +854,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
             for _ in 0..<40 {
                 try? await Task.sleep(nanoseconds: 250_000_000)
-                if await self.checkHealth() {
+                if (await self.checkHealth()).healthy {
                     self.webView.load(URLRequest(url: self.config.baseURL))
                     return
                 }
@@ -1120,7 +1162,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                         let tag = String(finalUrl[range.upperBound...]).split(separator: "?").first.map(String.init) ?? ""
                         if !tag.isEmpty {
                             let latestVer = tag.replacingOccurrences(of: "^v", with: "", options: .regularExpression)
-                            let dl = "https://github.com/\(updateRepoOwner)/\(updateRepoName)/releases/download/\(tag)/Antigravity-JP-macOS.zip"
+                            let tagWithV = tag.hasPrefix("v") || tag.hasPrefix("V") ? tag : "v\(latestVer)"
+                            let dl = "https://github.com/\(updateRepoOwner)/\(updateRepoName)/releases/download/\(tag)/Antigravity-JP-\(tagWithV)-macOS.zip"
                             return FetchedReleaseMetadata(
                                 latestVersion: latestVer,
                                 releaseName: "Antigravity 日本語版 v\(latestVer)",

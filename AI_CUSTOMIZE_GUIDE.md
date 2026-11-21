@@ -87,7 +87,7 @@ node scripts/build-dmg.mjs
 # 2. Swift 側 (deploy/macos/AntigravityJPApp.swift) を変更した場合のみ先に実行:
 node scripts/build-macos-app.mjs
 ```
-生成先: `dist-release/Antigravity-JP-macOS.dmg`（および `.zip`）
+生成先: `dist-release/Antigravity-JP-vX.Y.Z-macOS.dmg`（および `.zip`）
 
 ---
 

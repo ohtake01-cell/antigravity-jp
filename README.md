@@ -20,7 +20,7 @@ Mac 上のローカル [Antigravity](https://antigravity.google/)（Language Ser
 
 ## かんたんインストール（macOS）
 
-1. [Releases ページ](https://github.com/ohtake01-cell/antigravity-jp/releases/latest) から `Antigravity-JP-macOS.dmg` をダウンロード
+1. [Releases ページ](https://github.com/ohtake01-cell/antigravity-jp/releases/latest) から `Antigravity-JP-vX.Y.Z-macOS.dmg` をダウンロード
 2. `.dmg` を開き、`Antigravity日本語版.app` を `Applications` フォルダへドラッグ＆ドロップ
 3. 本家の **Antigravity** アプリを起動した状態で、`Antigravity日本語版.app` を起動
 

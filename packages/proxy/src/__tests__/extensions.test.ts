@@ -166,4 +166,23 @@ describe("extension routes (MCP, Skills, Plugins, Memories, Global Rules)", () =
     expect(badDel.status).toBe(400);
     expect(sanitizeSlug("Hello World!! 123")).toBe("hello-world-123");
   });
+
+  it("parses YAML folded/literal multiline skill descriptions cleanly", async () => {
+    const app = createApp();
+    const skillDir = join(tempHome, ".gemini", "config", "skills", "yaml-multiline");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: yaml-multiline\ndescription: >-\n  複数行にまたがる\n  YAML 説明文のテスト\n---\n\n本文\n",
+    );
+
+    const overviewRes = await app.request("/api/extensions/overview");
+    expect(overviewRes.status).toBe(200);
+    const overview = await overviewRes.json();
+    const found = overview.skills.find(
+      (s: { slug: string }) => s.slug === "yaml-multiline",
+    );
+    expect(found).toBeDefined();
+    expect(found.description).toBe("複数行にまたがる YAML 説明文のテスト");
+  });
 });

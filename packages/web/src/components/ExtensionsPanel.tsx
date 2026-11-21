@@ -67,7 +67,24 @@ const MEMORY_CATEGORY_LABELS: Record<MemoryItem["category"], string> = {
 };
 
 export function ExtensionsPanel() {
-  const [tab, setTab] = useState<ExtTab>("memories");
+  const [tab, setTab] = useState<ExtTab>(() => {
+    try {
+      const initial = sessionStorage.getItem("ext-panel-initial-tab");
+      if (
+        initial === "memories" ||
+        initial === "mcp" ||
+        initial === "skills" ||
+        initial === "plugins" ||
+        initial === "rules"
+      ) {
+        sessionStorage.removeItem("ext-panel-initial-tab");
+        return initial;
+      }
+    } catch {
+      // ignore
+    }
+    return "memories";
+  });
   const [data, setData] = useState<ExtensionOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -110,6 +127,10 @@ export function ExtensionsPanel() {
   }, []);
 
   const load = useCallback(async () => {
+    if (typeof api.extensionsOverview !== "function") {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await api.extensionsOverview();
@@ -131,6 +152,24 @@ export function ExtensionsPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const onFocusTab = (ev: Event) => {
+      const custom = ev as CustomEvent<{ tab?: ExtTab }>;
+      const next = custom.detail?.tab;
+      if (
+        next === "memories" ||
+        next === "mcp" ||
+        next === "skills" ||
+        next === "plugins" ||
+        next === "rules"
+      ) {
+        setTab(next);
+      }
+    };
+    window.addEventListener("ext-panel:focus-tab", onFocusTab);
+    return () => window.removeEventListener("ext-panel:focus-tab", onFocusTab);
+  }, []);
 
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -237,6 +276,12 @@ export function ExtensionsPanel() {
   };
 
   const handleDeleteMcp = async (name: string) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`MCP サーバー「${name}」を削除しますか？`)
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deleteMcpServer(name);
@@ -278,6 +323,12 @@ export function ExtensionsPanel() {
   };
 
   const handleDeleteSkill = async (slug: string) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`自作スキル「${slug}」を削除しますか？`)
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deleteSkill(slug);
@@ -315,6 +366,12 @@ export function ExtensionsPanel() {
   };
 
   const handleDeletePlugin = async (id: string) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`プラグイン「${id}」を削除しますか？`)
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.deletePlugin(id);
@@ -572,7 +629,11 @@ export function ExtensionsPanel() {
             <button
               type="submit"
               className="settings-archive-btn primary"
-              disabled={busy || !mcpName.trim()}
+              disabled={
+                busy ||
+                !mcpName.trim() ||
+                (mcpTransport === "http" ? !mcpUrl.trim() : !mcpCommand.trim())
+              }
             >
               ＋ MCP を追加 / 更新
             </button>

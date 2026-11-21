@@ -26,14 +26,14 @@ describe("update route helpers", () => {
         published_at: "2026-11-21T05:00:00Z",
         assets: [
           {
-            name: "Antigravity-JP-macOS.zip",
-            browser_download_url: "https://example.com/Antigravity-JP-macOS.zip",
+            name: "Antigravity-JP-v1.6.0-macOS.zip",
+            browser_download_url: "https://example.com/Antigravity-JP-v1.6.0-macOS.zip",
             size: 80_000_000,
             digest: `sha256:${sha}`,
           },
           {
-            name: "Antigravity-JP-macOS.dmg",
-            browser_download_url: "https://example.com/Antigravity-JP-macOS.dmg",
+            name: "Antigravity-JP-v1.6.0-macOS.dmg",
+            browser_download_url: "https://example.com/Antigravity-JP-v1.6.0-macOS.dmg",
             size: 95_000_000,
           },
         ],
@@ -43,8 +43,9 @@ describe("update route helpers", () => {
 
     expect(result.updateAvailable).toBe(true);
     expect(result.latestVersion).toBe("1.6.0");
+    expect(result.zipAsset?.name).toBe("Antigravity-JP-v1.6.0-macOS.zip");
     expect(result.zipAsset?.sha256).toBe(sha);
-    expect(result.dmgAsset?.name).toBe("Antigravity-JP-macOS.dmg");
+    expect(result.dmgAsset?.name).toBe("Antigravity-JP-v1.6.0-macOS.dmg");
   });
 
   it("builds fallback metadata from GitHub /releases/latest redirect URL", () => {
@@ -56,7 +57,10 @@ describe("update route helpers", () => {
     expect(fallback?.updateAvailable).toBe(true);
     expect(fallback?.latestVersion).toBe("1.7.2");
     expect(fallback?.zipAsset?.downloadUrl).toContain(
-      "/releases/download/v1.7.2/Antigravity-JP-macOS.zip",
+      "/releases/download/v1.7.2/Antigravity-JP-v1.7.2-macOS.zip",
+    );
+    expect(fallback?.dmgAsset?.downloadUrl).toContain(
+      "/releases/download/v1.7.2/Antigravity-JP-v1.7.2-macOS.dmg",
     );
   });
 

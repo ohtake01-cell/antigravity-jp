@@ -1294,7 +1294,7 @@ export function ChatInput({
           <textarea
             ref={textareaRef}
             className="chat-input"
-            placeholder="メッセージを入力...（先頭に / で定型プロンプト）"
+            placeholder="メッセージを入力..."
             value={draft}
             onChange={handleInput}
             onCompositionStart={handleCompositionStart}

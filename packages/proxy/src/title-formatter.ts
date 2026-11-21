@@ -28,7 +28,7 @@ const NOISE_SUFFIX_RE = /(?:[（(]引き継ぎ[)）]|[。！!？?…・\s])+$/u;
 const DANGLING_TAIL_RE = /[のをがにでとへはもや、,・／/（(「『]$/u;
 
 const FOLLOWUP_OR_META_RE =
-  /^(?:素晴らしい|ありがとう|了解|オッケー|ok\b|いいよ|進めて|止まら|どんどん|次(?:は|の|行こう|いこう|何)?|意見が聞きたい|どう思う|任せる|まかせる|おすすめで|おすすめで|とりあえずお願い|お願い(?:ね|します)?$|直して(?:くれ|ほしい)?$|できるかな|使える状態にして|職場にきた|おーい|こんにちは|このチャット閉じて|閉じてくれ|チャット名は|その仕組み|その作業が|それなら|これ(?:で|を|が|は)|掘り下げて|画像でわかりやすく|自動で追加されるように|終わったら|よろしく|後から機能を|作業を開始する前に|あなたはユーザーの頼れるAIアシスタント|そういうことができる|他にいい案|完了したのかな|終わったのかな|使ってみての感想|感想は|お前の意見|完成度を高めて|あともう一つ|もう一つ聞きたい|pdfで作った資料|動画のスライド|Antigravitybrainの資料|Antigravity日本語版の資料|Antigravitybrainに$|parta\s*geminiアプリは|porta\s*geminiアプリは|切り替えられる方向|そしたら、?Antigravity)/iu;
+  /^(?:素晴らしい|ありがとう|ありがとね|了解|オッケー|ok\b|いいよ|進めて|止まら|どんどん|次(?:は|の|行こう|いこう|何)?|意見が聞きたい|どう思う|任せる|まかせる|おすすめで|とりあえずお願い|お願い(?:ね|します)?$|直して(?:くれ|ほしい)?$|できるかな|使える状態にして|おーい|こんにちは|このチャット閉じて|閉じてくれ|チャット名は|その仕組み|その作業が|それなら|これ(?:で|を|が|は)|掘り下げて|画像でわかりやすく|自動で追加されるように|終わったら|よろしく|後から機能を|作業を開始する前に|あなたはユーザーの頼れるAIアシスタント|そういうことができる|他にいい案|完了したのかな|終わったのかな|使ってみての感想|感想は|完成度を高めて|あともう一つ|もう一つ聞きたい)/iu;
 
 const CONVERSATIONAL_ONLY_RE =
   /(?:のかな[？?]*$|どう思う[？?]*$|どうだ[？?]*$|意見だけを聞きたい|感想は[、,\s]*どう|資料があるよ|資料もあるはず|スライドもある|操作しやすいよ|悲しいよ$)/u;
@@ -197,49 +197,13 @@ function isNonTaskUtterance(req: string): boolean {
 
 function detectTargetSubject(
   recentTextsFirst: readonly string[],
-  paths: readonly string[],
+  _paths: readonly string[],
 ): string {
-  // Prioritize most recent substantive texts first; specific subjects beat generic "Porta"
   for (const t of recentTextsFirst) {
     const quoted = t.match(/『([^』]{2,14})』/);
     if (quoted?.[1]) {
       return quoted[1].trim();
     }
-    const low = t.toLowerCase();
-    
-    if (t.includes("エコノミスト2027") || t.includes("エコノミスト")) {
-      return "エコノミスト2027";
-    }
-    if (t.includes("ふたりの月さんぽ") || low.includes("moon30")) {
-      return "ふたりの月さんぽ";
-    }
-    if (
-      t.includes("月冒険") ||
-      low.includes("ep00") ||
-      low.includes("scene03") ||
-      low.includes("seq03")
-    ) {
-      return "月冒険EP0";
-    }
-    if (low.includes("chatgpt")) return "ChatGPT解析";
-    if (low.includes("evoto")) return "Evoto";
-    if (low.includes("topaz")) return "Topaz";
-    if (low.includes("lightroom")) return "Lightroom";
-    if (low.includes("photoshop")) return "Photoshop";
-    if (low.includes("orca")) return "Orca";
-    if (low.includes("porta") || low.includes("parta") || low.includes("prata")) {
-      return "Porta";
-    }
-  }
-
-  for (let i = paths.length - 1; i >= 0; i--) {
-    const pl = paths[i].toLowerCase();
-
-    if (pl.includes("/scratch/porta") || pl.includes("/porta-prod")) {
-      return "Porta";
-    }
-    if (pl.includes("moon_adventure")) return "月冒険EP0";
-    if (pl.includes("chatgpt_app_rea")) return "ChatGPT解析";
   }
   return "";
 }
@@ -261,7 +225,6 @@ export function summarizeUserTaskPhrase(
     if (rest) {
       const firstSentence = rest.split(/[。\n]/)[0]?.trim() ?? "";
       const action = firstSentence
-        .replace(/^王が|^王は/u, "")
         .replace(/(?:を反映しました|の指摘を反映しました)$/u, "反映")
         .replace(/(?:の準備相談です|を正式配置しました|を正式に復旧しました)$/u, "")
         .replace(/(?:まで進めるよう指示済み)$/u, "")
@@ -602,24 +565,28 @@ export async function resolveSmartConversationTitle(
   const manual = await getManualTitleLock(id);
   if (manual) return manual;
 
-  // 2. Always track the latest active work dynamically from transcript (mtime-cached),
-  //    so when work shifts inside a chat, the title shifts automatically!
+  // 2. Respect explicit non-empty disk annotation title or clean LS summary
+  //    so existing Antigravity titles are never overwritten with spurious guesses.
+  const cleanedDisk = stripTitleNoise(diskTitle ?? "");
+  if (cleanedDisk && !isConversationalOrBrokenTitle(cleanedDisk)) {
+    return clampTaskTitle(cleanedDisk, 28);
+  }
+
+  const cleanedSummary = stripTitleNoise(lsSummary ?? "");
+  if (cleanedSummary && !isConversationalOrBrokenTitle(cleanedSummary)) {
+    return clampTaskTitle(cleanedSummary, 28);
+  }
+
+  // 3. Only derive dynamically from transcript when no clean title exists yet
   const derived = await deriveTaskTitleFromTranscript(id);
   if (derived) {
     return derived;
   }
 
-  // 3. Fall back to cleaned disk / LS summary when no local transcript exists
   const rawPrimary = diskTitle?.trim() || lsSummary?.trim() || "";
-  const cleaned = stripTitleNoise(rawPrimary);
-  if (cleaned && !FOLLOWUP_OR_META_RE.test(cleaned)) {
-    return clampTaskTitle(cleaned, 28);
+  if (rawPrimary) {
+    return clampTaskTitle(stripTitleNoise(rawPrimary) || rawPrimary, 28);
   }
 
-  const fallbackCleaned = stripTitleNoise(lsSummary ?? "");
-  if (fallbackCleaned) {
-    return clampTaskTitle(fallbackCleaned, 28);
-  }
-
-  return rawPrimary || undefined;
+  return undefined;
 }

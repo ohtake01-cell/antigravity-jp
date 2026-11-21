@@ -5,6 +5,7 @@ import { TokenQuotaBadge } from "./TokenQuotaBadge";
 import { formatCompactModelBadge, type CompactModelProvider } from "./Sidebar";
 import {
   buildConversationMarkdown,
+  copyTextToClipboard,
   downloadMarkdownFile,
 } from "../utils/exportConversation";
 import type { TargetApp } from "../types";
@@ -56,7 +57,7 @@ export function ChatHeader({
     try {
       const md = await buildConversationMarkdown(conversationId, title);
       if (copyOnly) {
-        await navigator.clipboard?.writeText(md);
+        await copyTextToClipboard(md);
         setExportStatus("コピー済");
       } else {
         downloadMarkdownFile(title, md);

@@ -561,3 +561,57 @@
   touch-action: none; /* Prevent browser scroll during swipe gesture */
   cursor: default;
 }
+
+/* ── Long message collapse (user pastes / crash logs / huge replies) ── */
+
+.msg-markdown-wrap {
+  position: relative;
+}
+
+.msg-markdown-wrap.is-collapsed-long {
+  max-height: 220px;
+  overflow: hidden;
+}
+
+.msg-long-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--bg-secondary, #161922) 88%
+  );
+}
+
+.message.assistant .msg-long-fade {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--bg-primary, #0d0f13) 88%
+  );
+}
+
+.msg-long-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle, #2a2f3e);
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.05));
+  color: var(--text-secondary, #9ba3b8);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.msg-long-toggle-btn:hover {
+  border-color: var(--accent, #6366f1);
+  color: var(--text-primary, #f3f4f6);
+}

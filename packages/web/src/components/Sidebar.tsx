@@ -5,6 +5,11 @@ import { getAppIconUrl } from "../hooks/useClientSettings";
 import type { AppIconPreset, AppTier, ProjectEntry } from "../types";
 import { api } from "../api/client";
 import {
+  buildConversationMarkdown,
+  copyTextToClipboard,
+  downloadMarkdownFile,
+} from "../utils/exportConversation";
+import {
   IconPlus,
   IconSearch,
   IconMenu,
@@ -257,6 +262,11 @@ function ContextMenu({
   onAssignProject,
   onOpenAddProject,
   onBranchSideChat,
+  onSplitOpen,
+  onCopyId,
+  onCopyMarkdown,
+  onDownloadMarkdown,
+  onOpenPlugins,
   onArchive,
   onDelete,
   onClose,
@@ -271,12 +281,18 @@ function ContextMenu({
   onAssignProject?: (projectId: string | null) => void;
   onOpenAddProject?: () => void;
   onBranchSideChat?: () => void;
+  onSplitOpen?: () => void;
+  onCopyId?: () => void;
+  onCopyMarkdown?: () => void;
+  onDownloadMarkdown?: () => void;
+  onOpenPlugins?: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [copyMenuOpen, setCopyMenuOpen] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -438,6 +454,92 @@ function ContextMenu({
             }}
           >
             <span>🌿 枝分かれ</span>
+          </button>
+        )}
+        {onSplitOpen && (
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSplitOpen();
+              onClose();
+            }}
+          >
+            <span>🪟 分割して別画面で開く</span>
+          </button>
+        )}
+        {(onCopyId || onCopyMarkdown || onDownloadMarkdown) && (
+          <div className="context-menu-project-section">
+            <button
+              type="button"
+              className={`context-menu-item ${copyMenuOpen ? "expanded" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCopyMenuOpen((v) => !v);
+              }}
+            >
+              <span>📋 コピー・書き出し</span>
+              <span className="context-menu-caret">
+                {copyMenuOpen ? "▴" : "▾"}
+              </span>
+            </button>
+            {copyMenuOpen && (
+              <div className="context-menu-project-list" role="group">
+                {onCopyId && (
+                  <button
+                    type="button"
+                    className="context-menu-project-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCopyId();
+                      onClose();
+                    }}
+                  >
+                    <span>🔑 チャット ID をコピー</span>
+                  </button>
+                )}
+                {onCopyMarkdown && (
+                  <button
+                    type="button"
+                    className="context-menu-project-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCopyMarkdown();
+                      onClose();
+                    }}
+                  >
+                    <span>📄 会話を Markdown コピー</span>
+                  </button>
+                )}
+                {onDownloadMarkdown && (
+                  <button
+                    type="button"
+                    className="context-menu-project-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDownloadMarkdown();
+                      onClose();
+                    }}
+                  >
+                    <span>💾 Markdown (.md) 保存</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {onOpenPlugins && (
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenPlugins();
+              onClose();
+            }}
+          >
+            <span>🧩 プラグイン・MCP・スキル</span>
           </button>
         )}
         <button
@@ -1630,6 +1732,44 @@ export function Sidebar({
                 onBranchSideChat={
                   onBranchSideChat ? () => onBranchSideChat(conv) : undefined
                 }
+                onSplitOpen={() => {
+                  const base = window.location.origin;
+                  const segs = window.location.pathname.split("/").filter(Boolean);
+                  const slug = segs[0] || "unknown";
+                  window.open(`${base}/${slug}/${conv.id}`, "_blank");
+                }}
+                onCopyId={() => {
+                  void copyTextToClipboard(conv.id)
+                    .then(() => showSidebarToast("🔑 チャット ID をコピーしました"))
+                    .catch(() => showSidebarToast("コピーに失敗しました", true));
+                }}
+                onCopyMarkdown={() => {
+                  void buildConversationMarkdown(conv.id, displayTitle)
+                    .then((md) => copyTextToClipboard(md))
+                    .then(() => showSidebarToast("📄 会話を Markdown でコピーしました"))
+                    .catch(() => showSidebarToast("コピーに失敗しました", true));
+                }}
+                onDownloadMarkdown={() => {
+                  void buildConversationMarkdown(conv.id, displayTitle)
+                    .then((md) => {
+                      downloadMarkdownFile(displayTitle, md);
+                      showSidebarToast("💾 Markdown ファイルを保存しました");
+                    })
+                    .catch(() => showSidebarToast("書き出しに失敗しました", true));
+                }}
+                onOpenPlugins={() => {
+                  try {
+                    sessionStorage.setItem("ext-panel-initial-tab", "plugins");
+                  } catch {
+                    // ignore
+                  }
+                  window.dispatchEvent(
+                    new CustomEvent("ext-panel:focus-tab", {
+                      detail: { tab: "plugins" },
+                    }),
+                  );
+                  onSettings();
+                }}
                 onArchive={() => void handleArchive(conv)}
                 onDelete={() => onDelete(conv.id)}
                 onClose={closeMenu}

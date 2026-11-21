@@ -387,4 +387,37 @@ describe("ChatPanel", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "削除" })[1]);
     expect(onRemoveOptimistic).toHaveBeenCalledWith("opt-failed-1");
   });
+
+  it("collapses long user messages by default and toggles expand/collapse", async () => {
+    const longLines = Array.from(
+      { length: 14 },
+      (_, i) => `長い引き継ぎ本文の行 ${i + 1}`,
+    ).join("\n");
+
+    mockSteps(
+      [
+        {
+          type: "CORTEX_STEP_TYPE_USER_INPUT",
+          userInput: { items: [{ text: longLines }] },
+        },
+      ],
+      false,
+      0,
+    );
+
+    render(
+      <ChatPanel
+        cascadeId="cascade-long-collapse"
+        onRevert={vi.fn()}
+        onFilePermission={vi.fn()}
+      />,
+    );
+
+    const toggleBtn = screen.getByTestId("msg-long-toggle-btn");
+    expect(toggleBtn).toHaveTextContent("▼ 全文を表示");
+    await userEvent.click(toggleBtn);
+    expect(toggleBtn).toHaveTextContent("▲ 折りたたむ");
+    await userEvent.click(toggleBtn);
+    expect(toggleBtn).toHaveTextContent("▼ 全文を表示");
+  });
 });

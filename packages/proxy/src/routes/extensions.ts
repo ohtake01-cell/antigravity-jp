@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Hono } from "hono";
 
@@ -160,14 +160,36 @@ function parseSkillMarkdown(raw: string, fallbackSlug: string): {
   if (fmMatch) {
     const fm = fmMatch[1] ?? "";
     body = fmMatch[2] ?? "";
-    for (const line of fm.split(/\r?\n/)) {
+    const lines = fm.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
       const nameMatch = line.match(/^name:\s*(.+)$/);
       if (nameMatch) {
         name = nameMatch[1].trim().replace(/^["']|["']$/g, "");
+        continue;
       }
-      const descMatch = line.match(/^description:\s*(.+)$/);
+      const descMatch = line.match(/^description:\s*(.*)$/);
       if (descMatch) {
-        description = descMatch[1].trim().replace(/^["']|["']$/g, "");
+        const val = descMatch[1].trim();
+        if (/^[>|][+-]?$/.test(val) || val === "") {
+          // YAML folded/literal 複数行ブロック (例: description: >- / |)
+          const blockLines: string[] = [];
+          while (i + 1 < lines.length) {
+            const next = lines[i + 1] ?? "";
+            if (/^[ \t]+/.test(next)) {
+              blockLines.push(next.trim());
+              i++;
+            } else if (next.trim() === "") {
+              blockLines.push("");
+              i++;
+            } else {
+              break;
+            }
+          }
+          description = blockLines.join(" ").replace(/\s+/g, " ").trim();
+        } else {
+          description = val.replace(/^["']|["']$/g, "");
+        }
       }
     }
   }
@@ -608,7 +630,7 @@ export function registerExtensionRoutes(app: Hono): void {
       const slug = assertSafeSingleSegment(c.req.param("slug"));
       const paths = getExtensionPaths();
       const targetDir = resolve(paths.skillsDir, slug);
-      if (!targetDir.startsWith(resolve(paths.skillsDir) + "/")) {
+      if (!targetDir.startsWith(resolve(paths.skillsDir) + sep)) {
         return c.json({ error: "不正なパスです" }, 400);
       }
       if (existsSync(targetDir)) {
@@ -721,7 +743,7 @@ export function registerExtensionRoutes(app: Hono): void {
       const id = assertSafeSingleSegment(c.req.param("id"));
       const paths = getExtensionPaths();
       const targetDir = resolve(paths.pluginsDir, id);
-      if (!targetDir.startsWith(resolve(paths.pluginsDir) + "/")) {
+      if (!targetDir.startsWith(resolve(paths.pluginsDir) + sep)) {
         return c.json({ error: "不正なパスです" }, 400);
       }
       if (existsSync(targetDir)) {

@@ -10,6 +10,7 @@ vi.mock("../api/client", () => ({
     models: vi.fn(),
     archivedConversations: vi.fn(),
     updateAnnotations: vi.fn(),
+    extensionsOverview: vi.fn(),
   },
 }));
 
@@ -45,6 +46,20 @@ describe("SettingsPanel", () => {
       ok: true,
       id: "conv-arch-1",
       archived: false,
+    });
+    mockedApi.extensionsOverview.mockResolvedValue({
+      ok: true,
+      mcpServers: [],
+      skills: [],
+      plugins: [],
+      memories: [],
+      globalRules: "",
+      paths: {
+        mcpConfigPath: "~/.gemini/config/mcp_config.json",
+        skillsDir: "~/.gemini/config/skills",
+        pluginsDir: "~/.gemini/config/plugins",
+        rulesPath: "~/.gemini/config/GEMINI.md",
+      },
     });
   });
 

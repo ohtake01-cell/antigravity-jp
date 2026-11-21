@@ -111,7 +111,7 @@ export function resolveCurrentAppVersion(): string {
       // 次の候補を確認
     }
   }
-  return "1.5.0";
+  return "1.5.1";
 }
 
 export function parseGitHubReleasePayload(
@@ -174,6 +174,9 @@ export function buildRedirectFallbackResult(
   if (!match) return null;
   const tag = match[1];
   const latestVersion = normalizeVersionString(tag);
+  const tagWithV = tag.startsWith("v") || tag.startsWith("V") ? tag : `v${latestVersion}`;
+  const zipName = `Antigravity-JP-${tagWithV}-macOS.zip`;
+  const dmgName = `Antigravity-JP-${tagWithV}-macOS.dmg`;
   const baseDownload = `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/download/${encodeURIComponent(tag)}`;
   return {
     currentVersion,
@@ -184,14 +187,14 @@ export function buildRedirectFallbackResult(
     releaseUrl: redirectedUrl,
     publishedAt: null,
     zipAsset: {
-      name: "Antigravity-JP-macOS.zip",
-      downloadUrl: `${baseDownload}/Antigravity-JP-macOS.zip`,
+      name: zipName,
+      downloadUrl: `${baseDownload}/${zipName}`,
       size: 0,
       sha256: null,
     },
     dmgAsset: {
-      name: "Antigravity-JP-macOS.dmg",
-      downloadUrl: `${baseDownload}/Antigravity-JP-macOS.dmg`,
+      name: dmgName,
+      downloadUrl: `${baseDownload}/${dmgName}`,
       size: 0,
       sha256: null,
     },

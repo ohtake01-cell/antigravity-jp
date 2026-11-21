@@ -427,6 +427,115 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-body">
+        {/* ── バージョン・自動アップデート ── */}
+        {appUpdate && (
+          <div className="settings-section" data-testid="app-update-section">
+            <div className="settings-section-header-row">
+              <h2 className="settings-section-title">🔄 バージョン・アップデート</h2>
+              <button
+                type="button"
+                className="settings-archive-btn"
+                disabled={appUpdate.isBusy || appUpdate.state.phase === "checking"}
+                onClick={() => void appUpdate.checkForUpdates(true)}
+              >
+                {appUpdate.state.phase === "checking"
+                  ? "確認中…"
+                  : "アップデートを確認"}
+              </button>
+            </div>
+            <p className="settings-archive-desc">
+              GitHub Releases から最新バージョンを確認し、ワンクリックで自動更新＆再起動できます（チャット履歴や設定は消えません）。
+            </p>
+            <div className="update-status-card">
+              <div className="update-status-meta">
+                <span>
+                  現在のバージョン:{" "}
+                  <strong>v{appUpdate.state.currentVersion}</strong>
+                </span>
+                {appUpdate.state.latestVersion && (
+                  <span>
+                    最新バージョン:{" "}
+                    <strong>v{appUpdate.state.latestVersion}</strong>
+                  </span>
+                )}
+              </div>
+              {appUpdate.state.message && (
+                <div
+                  className={`ext-feedback ${appUpdate.state.phase === "error" ? "error" : "ok"}`}
+                  style={{ marginTop: 8 }}
+                >
+                  {appUpdate.state.phase === "downloading"
+                    ? `ダウンロード中… ${Math.round(appUpdate.state.progress * 100)}%${
+                        appUpdate.state.totalBytes > 0
+                          ? ` (${formatBytesMb(appUpdate.state.downloadedBytes)} / ${formatBytesMb(appUpdate.state.totalBytes)})`
+                          : ""
+                      }`
+                    : appUpdate.state.error || appUpdate.state.message}
+                </div>
+              )}
+              {appUpdate.state.phase === "downloading" && (
+                <div
+                  className="update-banner-progress-track"
+                  style={{ marginTop: 8 }}
+                >
+                  <div
+                    className="update-banner-progress-fill"
+                    style={{
+                      width: `${Math.round(appUpdate.state.progress * 100)}%`,
+                    }}
+                  />
+                </div>
+              )}
+              <div className="update-status-actions">
+                {appUpdate.state.updateAvailable && !appUpdate.isBusy && (
+                  <button
+                    type="button"
+                    className="settings-archive-btn primary"
+                    onClick={appUpdate.installUpdate}
+                  >
+                    {appUpdate.state.canAutoInstall
+                      ? `✨ v${appUpdate.state.latestVersion} にアップデートして再起動`
+                      : "ダウンロードページを開く"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="settings-archive-btn"
+                  onClick={appUpdate.openReleasePage}
+                >
+                  GitHub Releases を開く
+                </button>
+              </div>
+              {appUpdate.state.isNativeApp && (
+                <div className="settings-row" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border-subtle)" }}>
+                  <div className="settings-row-info">
+                    <span className="settings-row-label">
+                      起動時にアップデートを自動確認
+                    </span>
+                    <span className="settings-row-desc">
+                      オフにしても、上のボタンやメニューバーからいつでも手動確認できます
+                    </span>
+                  </div>
+                  <label className="settings-switch">
+                    <input
+                      type="checkbox"
+                      checked={appUpdate.state.autoCheckEnabled}
+                      onChange={(e) =>
+                        appUpdate.setAutoCheckEnabled(e.target.checked)
+                      }
+                      aria-label="起動時にアップデートを自動確認"
+                    />
+                    <span className="settings-switch-track" />
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── 拡張機能・カスタマイズ管理（メモリ / MCP / スキル / プラグイン / ルール） ── */}
+        <ExtensionsPanel />
+
         {/* ── エディション切替（下位 / 上位モデル統合） ── */}
         <div className="settings-section" data-testid="edition-tier-section">
           <h2 className="settings-section-title">表示モード（下位 / 上位モデル切替）</h2>
@@ -995,115 +1104,6 @@ export function SettingsPanel({
             </div>
           )}
         </div>
-
-        {/* ── 拡張機能・カスタマイズ管理（メモリ / MCP / スキル / プラグイン / ルール） ── */}
-        <ExtensionsPanel />
-
-        {/* ── バージョン・自動アップデート ── */}
-        {appUpdate && (
-          <div className="settings-section" data-testid="app-update-section">
-            <div className="settings-section-header-row">
-              <h2 className="settings-section-title">🔄 バージョン・アップデート</h2>
-              <button
-                type="button"
-                className="settings-archive-btn"
-                disabled={appUpdate.isBusy || appUpdate.state.phase === "checking"}
-                onClick={() => void appUpdate.checkForUpdates(true)}
-              >
-                {appUpdate.state.phase === "checking"
-                  ? "確認中…"
-                  : "アップデートを確認"}
-              </button>
-            </div>
-            <p className="settings-archive-desc">
-              GitHub Releases から最新バージョンを確認し、ワンクリックで自動更新＆再起動できます（チャット履歴や設定は消えません）。
-            </p>
-            <div className="update-status-card">
-              <div className="update-status-meta">
-                <span>
-                  現在のバージョン:{" "}
-                  <strong>v{appUpdate.state.currentVersion}</strong>
-                </span>
-                {appUpdate.state.latestVersion && (
-                  <span>
-                    最新バージョン:{" "}
-                    <strong>v{appUpdate.state.latestVersion}</strong>
-                  </span>
-                )}
-              </div>
-              {appUpdate.state.message && (
-                <div
-                  className={`ext-feedback ${appUpdate.state.phase === "error" ? "error" : "ok"}`}
-                  style={{ marginTop: 8 }}
-                >
-                  {appUpdate.state.phase === "downloading"
-                    ? `ダウンロード中… ${Math.round(appUpdate.state.progress * 100)}%${
-                        appUpdate.state.totalBytes > 0
-                          ? ` (${formatBytesMb(appUpdate.state.downloadedBytes)} / ${formatBytesMb(appUpdate.state.totalBytes)})`
-                          : ""
-                      }`
-                    : appUpdate.state.error || appUpdate.state.message}
-                </div>
-              )}
-              {appUpdate.state.phase === "downloading" && (
-                <div
-                  className="update-banner-progress-track"
-                  style={{ marginTop: 8 }}
-                >
-                  <div
-                    className="update-banner-progress-fill"
-                    style={{
-                      width: `${Math.round(appUpdate.state.progress * 100)}%`,
-                    }}
-                  />
-                </div>
-              )}
-              <div className="update-status-actions">
-                {appUpdate.state.updateAvailable && !appUpdate.isBusy && (
-                  <button
-                    type="button"
-                    className="settings-archive-btn primary"
-                    onClick={appUpdate.installUpdate}
-                  >
-                    {appUpdate.state.canAutoInstall
-                      ? `✨ v${appUpdate.state.latestVersion} にアップデートして再起動`
-                      : "ダウンロードページを開く"}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="settings-archive-btn"
-                  onClick={appUpdate.openReleasePage}
-                >
-                  GitHub Releases を開く
-                </button>
-              </div>
-              {appUpdate.state.isNativeApp && (
-                <div className="settings-row" style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border-subtle)" }}>
-                  <div className="settings-row-info">
-                    <span className="settings-row-label">
-                      起動時にアップデートを自動確認
-                    </span>
-                    <span className="settings-row-desc">
-                      オフにしても、上のボタンやメニューバーからいつでも手動確認できます
-                    </span>
-                  </div>
-                  <label className="settings-switch">
-                    <input
-                      type="checkbox"
-                      checked={appUpdate.state.autoCheckEnabled}
-                      onChange={(e) =>
-                        appUpdate.setAutoCheckEnabled(e.target.checked)
-                      }
-                      aria-label="起動時にアップデートを自動確認"
-                    />
-                    <span className="settings-switch-track" />
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* ── リセット ── */}
         <button className="settings-reset-btn" onClick={handleReset}>

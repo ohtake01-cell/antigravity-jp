@@ -23,6 +23,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
+const pkg = JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf-8"));
+const appVersion = String(pkg.version || "1.5.1").replace(/^v/i, "");
+const versionTag = `v${appVersion}`;
 const releaseRoot = path.join(rootDir, "dist-release");
 const bundleDir = path.join(releaseRoot, "Antigravity日本語版_Mac配布セット");
 
@@ -168,15 +171,15 @@ try {
   }
   console.log("✅ DMG ステージング プライバシー検査: 異常なし (0件)");
 
-  // 4. .dmg 作成（圧縮 UDZO）
-  const dmgOut = path.join(releaseRoot, "Antigravity-JP-macOS.dmg");
+  // 4. .dmg 作成（圧縮 UDZO・バージョン入りファイル名）
+  const dmgOut = path.join(releaseRoot, `Antigravity-JP-${versionTag}-macOS.dmg`);
   rmSync(dmgOut, { force: true });
   execFileSync(
     "hdiutil",
     [
       "create",
       "-volname",
-      "Antigravity 日本語版",
+      `Antigravity 日本語版 ${versionTag}`,
       "-srcfolder",
       dmgStage,
       "-ov",
@@ -187,8 +190,8 @@ try {
     { stdio: "inherit" },
   );
 
-  // 5. 単体完結 .app 入り .zip も生成（GitHub ダウンロード URL 用）
-  const zipOut = path.join(releaseRoot, "Antigravity-JP-macOS.zip");
+  // 5. 単体完結 .app 入り .zip も生成（GitHub ダウンロード URL / 自動アップデート用）
+  const zipOut = path.join(releaseRoot, `Antigravity-JP-${versionTag}-macOS.zip`);
   rmSync(zipOut, { force: true });
   execFileSync(
     "ditto",

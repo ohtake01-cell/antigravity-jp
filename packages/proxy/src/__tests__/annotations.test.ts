@@ -104,7 +104,7 @@ describe("PATCH /api/conversations/:id/annotations", () => {
     return app;
   }
 
-  it("forwards title, pinned, archived to UpdateConversationAnnotations with mergeAnnotations: true", async () => {
+  it("forwards title, pinned, archived:false with mergeAnnotations:false so proto3 clears archived cleanly", async () => {
     mockRpcForConversation.mockResolvedValue({ ok: true });
 
     const res = await createApp().request(
@@ -137,9 +137,8 @@ describe("PATCH /api/conversations/:id/annotations", () => {
         annotations: expect.objectContaining({
           title: "新しい名前",
           pinned: true,
-          archived: false,
         }),
-        mergeAnnotations: true,
+        mergeAnnotations: false,
       }),
       undefined,
       false,

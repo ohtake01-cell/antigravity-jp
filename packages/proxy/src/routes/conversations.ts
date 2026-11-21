@@ -1211,6 +1211,7 @@ export function registerConversationRoutes(app: Hono): void {
               }
               normalizedSummary.annotations = {
                 ...annotations,
+                ...(diskTitle ? { title: diskTitle } : {}),
                 archived: true,
               };
               if (diskAnnotation?.archivedAtSeconds) {
@@ -1257,7 +1258,10 @@ export function registerConversationRoutes(app: Hono): void {
             createdTime: item.lastModifiedTime,
             trajectoryId: "",
             workspaces: injectedWorkspaces,
-            annotations: { archived: true },
+            annotations: {
+              archived: true,
+              ...(item.title ? { title: item.title } : {}),
+            },
           };
         }
       }
@@ -2267,21 +2271,30 @@ export function registerConversationRoutes(app: Hono): void {
       if (patch.archived !== undefined) {
         rpcAnnotations.archivalStatusTimestamp = new Date().toISOString();
       }
-      // proto3 の仕様上、mergeAnnotations:true で pinned:false を送るとデフォルト値として無視され
-      // LS メモリ上の pinned:true が残って復活してしまう。pinned:false 指定時は既存項目を引き継ぎ
-      // mergeAnnotations:false で明示的に置換して LS 側からも確実にクリアする。
+      // proto3 の仕様上、mergeAnnotations:true で pinned:false や archived:false を送ると
+      // デフォルト値として無視され、LS メモリ上の true が残って復活してしまう。
+      // false 指定時は既存項目を引き継ぎ mergeAnnotations:false で明示的に置換して確実にクリアする。
       let mergeAnnotations = true;
-      if (patch.pinned === false) {
+      if (patch.pinned === false || patch.archived === false) {
         mergeAnnotations = false;
-        delete rpcAnnotations.pinned;
-        if (rpcAnnotations.title === undefined && existingDiskMeta?.title) {
-          rpcAnnotations.title = existingDiskMeta.title;
+        if (patch.pinned === false) {
+          delete rpcAnnotations.pinned;
+        } else if (
+          rpcAnnotations.pinned === undefined &&
+          existingDiskMeta?.pinned === true
+        ) {
+          rpcAnnotations.pinned = true;
         }
-        if (
+        if (patch.archived === false) {
+          delete rpcAnnotations.archived;
+        } else if (
           rpcAnnotations.archived === undefined &&
           existingDiskMeta?.archived === true
         ) {
           rpcAnnotations.archived = true;
+        }
+        if (rpcAnnotations.title === undefined && existingDiskMeta?.title) {
+          rpcAnnotations.title = existingDiskMeta.title;
         }
       }
       await rpcForConversation(
