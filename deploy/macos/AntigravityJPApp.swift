@@ -78,17 +78,28 @@ private func resolveAppConfig() -> AppConfig {
     return AppConfig(host: host, port: port, baseURL: baseURL, runtimeDir: resolvedRuntime)
 }
 
-private func findNodeBinary() -> String? {
+private func findNodeBinary(runtimeDir: String?) -> String? {
     let fm = FileManager.default
     let home = fm.homeDirectoryForCurrentUser.path
-    var candidates = [
+    var candidates: [String] = []
+
+    // 1. 最優先: アプリ内蔵の Universal Node.js（Apple Silicon / Intel 両対応・Node未導入Macでも即起動）
+    if let runtimeDir, !runtimeDir.isEmpty {
+        candidates.append("\(runtimeDir)/bin/node")
+    }
+    if let resPath = Bundle.main.resourcePath {
+        candidates.append("\(resPath)/runtime/bin/node")
+    }
+
+    // 2. フォールバック: 環境変数およびシステム導入済み Node.js
+    candidates.append(contentsOf: [
         ProcessInfo.processInfo.environment["AG_JP_NODE_BIN"] ?? "",
         "/opt/homebrew/bin/node",
         "/usr/local/bin/node",
         "\(home)/.volta/bin/node",
         "\(home)/.asdf/shims/node",
         "\(home)/.fnm/current/bin/node",
-    ]
+    ])
 
     // nvm で導入された Node.js も降順検索
     let nvmDir = "\(home)/.nvm/versions/node"
@@ -497,11 +508,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let proc = managedServerProcess, proc.isRunning {
             return (true, nil)
         }
-        guard let nodeBin = findNodeBinary() else {
-            return (false, "Node.js（v22以上）が見つかりませんでした。https://nodejs.org/ からインストールしてください。")
-        }
         guard let runtimeDir = config.runtimeDir else {
-            return (false, "アプリのランタイム（runtime フォルダ）が見つかりませんでした。配布セットの「セットアップ.command」をもう一度実行してください。")
+            return (false, "アプリのランタイム（runtime フォルダ）が見つかりませんでした。DMG または配布ZIPからアプリを入れ直してください。")
+        }
+        guard let nodeBin = findNodeBinary(runtimeDir: runtimeDir) else {
+            return (false, "Node.js（v22以上）が見つかりませんでした。Universal版DMGから再インストールするか、https://nodejs.org/ から導入してください。")
         }
 
         let fm = FileManager.default

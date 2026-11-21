@@ -14,29 +14,35 @@ echo "  Antigravity 日本語版（Mac ネイティブアプリ）セットア�
 echo "=================================================="
 echo ""
 
-# 1. Node.js 確認
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.volta/bin:$HOME/.fnm/current/bin:$PATH"
-if [ -d "$HOME/.nvm/versions/node" ]; then
-  LATEST_NVM="$(ls -1 "$HOME/.nvm/versions/node" | sort -V | tail -n 1 || true)"
-  if [ -n "$LATEST_NVM" ]; then
-    export PATH="$HOME/.nvm/versions/node/$LATEST_NVM/bin:$PATH"
+# 1. Node.js 確認（アプリ内蔵の Universal Node.js があればシステム側の導入は不要）
+BUNDLED_NODE="$APP_SRC/Contents/Resources/runtime/bin/node"
+if [ -x "$BUNDLED_NODE" ]; then
+  NODE_VER="$("$BUNDLED_NODE" -v 2>/dev/null || echo "内蔵Universal")"
+  echo "✅ アプリ内蔵の Universal Node.js を使用します: $NODE_VER（追加インストール不要）"
+else
+  export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.volta/bin:$HOME/.fnm/current/bin:$PATH"
+  if [ -d "$HOME/.nvm/versions/node" ]; then
+    LATEST_NVM="$(ls -1 "$HOME/.nvm/versions/node" | sort -V | tail -n 1 || true)"
+    if [ -n "$LATEST_NVM" ]; then
+      export PATH="$HOME/.nvm/versions/node/$LATEST_NVM/bin:$PATH"
+    fi
   fi
-fi
 
-NODE_BIN="$(command -v node || true)"
-if [ -z "$NODE_BIN" ]; then
-  echo "❌ Node.js が見つかりませんでした。"
-  echo ""
-  echo "以下のいずれかの方法で Node.js（v22 以上）をインストールしてから、もう一度このファイルを開いてください："
-  echo "  ・公式サイト: https://nodejs.org/"
-  echo "  ・Homebrew:   brew install node"
-  echo ""
-  read -r -p "Enter キーを押して閉じます..."
-  exit 1
-fi
+  NODE_BIN="$(command -v node || true)"
+  if [ -z "$NODE_BIN" ]; then
+    echo "❌ Node.js が見つかりませんでした。"
+    echo ""
+    echo "以下のいずれかの方法で Node.js（v22 以上）をインストールしてから、もう一度このファイルを開いてください："
+    echo "  ・公式サイト: https://nodejs.org/"
+    echo "  ・Homebrew:   brew install node"
+    echo ""
+    read -r -p "Enter キーを押して閉じます..."
+    exit 1
+  fi
 
-NODE_VER="$("$NODE_BIN" -v)"
-echo "✅ Node.js を検出しました: $NODE_VER ($NODE_BIN)"
+  NODE_VER="$("$NODE_BIN" -v)"
+  echo "✅ Node.js を検出しました: $NODE_VER ($NODE_BIN)"
+fi
 
 # 2. Antigravity インストール確認（警告のみ・続行可能）
 if [ -d "/Applications/Antigravity.app" ] || [ -d "/Applications/Antigravity IDE.app" ] || [ -x "$HOME/.gemini/bin/agy" ] || command -v agy >/dev/null 2>&1; then
@@ -48,15 +54,19 @@ fi
 
 # 3. 既存プロセスの安全な停止（この日本語版のみ）
 pkill -f "AntigravityJP/runtime/proxy/dist/index.js" 2>/dev/null || true
+pkill -f "Antigravity日本語版.app/Contents/Resources/runtime/proxy/dist/index.js" 2>/dev/null || true
 osascript -e 'tell application "Antigravity 日本語版" to quit' 2>/dev/null || true
 sleep 1
 
-# 4. ランタイム配置
-echo ""
-echo "📦 アプリのランタイムを配置しています..."
+# 4. ランタイム配置（外付け runtime がある配布セットのみコピー。DMG単体完結版は .app 内蔵ランタイムをそのまま使用）
 mkdir -p "$SUPPORT_DIR"
-rm -rf "$RUNTIME_DEST"
-cp -R "$SCRIPT_DIR/runtime" "$RUNTIME_DEST"
+if [ -d "$SCRIPT_DIR/runtime" ] && [ ! -d "$APP_SRC/Contents/Resources/runtime" ]; then
+  echo ""
+  echo "📦 アプリのランタイムを配置しています..."
+  rm -rf "$RUNTIME_DEST"
+  cp -R "$SCRIPT_DIR/runtime" "$RUNTIME_DEST"
+  echo "✅ ランタイム配置完了: $RUNTIME_DEST"
+fi
 
 if [ ! -f "$SUPPORT_DIR/config.env" ]; then
   cat > "$SUPPORT_DIR/config.env" <<EOF
@@ -65,7 +75,6 @@ PORTA_PORT=$PORT_DEFAULT
 PORTA_STANDALONE_CORE=true
 EOF
 fi
-echo "✅ ランタイム配置完了: $RUNTIME_DEST"
 
 # 5. アプリ本体を /Applications へインストール
 echo ""

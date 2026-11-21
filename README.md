@@ -27,7 +27,8 @@ Mac 上のローカル [Antigravity](https://antigravity.google/)（Language Ser
 > xattr -dr com.apple.quarantine "/Applications/Antigravity日本語版.app"
 > ```
 >
-> **必要な環境**: macOS（Apple Silicon / Intel 両対応 Universal Binary）、Node.js 20 以上、本家 Antigravity。
+> **必要な環境**: macOS 13 (Ventura) 以降（**Apple Silicon M1〜M4 / Intel Mac 完全両対応・Universal 版**）、本家 Antigravity。  
+> ※ **Node.js・Rosetta 2・セットアップコマンドは不要**です（Universal Node.js ランタイムを `.app` 内に完全同梱しています）。
 
 ## 自分の AI に改造させたい時
 

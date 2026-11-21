@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -96,7 +97,15 @@ try {
     );
   }
 
-  // 2. Info.plist 出力
+  // 2. Info.plist 出力（package.json のバージョンを自動反映）
+  const pkgVersion = (() => {
+    try {
+      const pkg = JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf-8"));
+      return typeof pkg.version === "string" && pkg.version ? pkg.version : "1.4.0";
+    } catch {
+      return "1.4.0";
+    }
+  })();
   const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -118,9 +127,9 @@ try {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0.0</string>
+  <string>${pkgVersion}</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>${pkgVersion}</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
