@@ -117,8 +117,11 @@ describe("browser notifications", () => {
 
     await page!.navigate(app.url("/porta/settings"));
     await installNotificationRecorder(page!);
-
-    await page!.click('input[aria-label="Browser Notifications"]');
+    await page!.waitFor(
+      `Boolean(document.querySelector('input[aria-label="ブラウザ通知"]'))`,
+      { timeoutMs: 10_000, description: "notification toggle to render" },
+    );
+    await page!.click('input[aria-label="ブラウザ通知"]');
 
     await page!.waitFor(
       `(() => {
@@ -132,7 +135,7 @@ describe("browser notifications", () => {
       await page!.evaluate<string>(
         `document.querySelector(".settings-permission-status")?.textContent ?? ""`,
       ),
-    ).toBe("On");
+    ).toBe("オン");
   });
 
   it("fires a browser notification for new command approval requests", async () => {
@@ -144,7 +147,11 @@ describe("browser notifications", () => {
 
     await page!.navigate(app.url("/porta/settings"));
     await installNotificationRecorder(page!);
-    await page!.click('input[aria-label="Browser Notifications"]');
+    await page!.waitFor(
+      `Boolean(document.querySelector('input[aria-label="ブラウザ通知"]'))`,
+      { timeoutMs: 10_000, description: "notification toggle to render" },
+    );
+    await page!.click('input[aria-label="ブラウザ通知"]');
 
     await page!.navigate(app.url("/porta/conv-notify"));
     await installNotificationRecorder(page!);
@@ -159,7 +166,7 @@ describe("browser notifications", () => {
 
     await page!.waitFor(
       `window.__portaNotifications?.some((notification) =>
-        notification.title === "Porta needs approval" &&
+        notification.title === "Porta: 承認が必要です" &&
         notification.body === "pnpm test" &&
         notification.permission === "granted"
       )`,
@@ -177,7 +184,11 @@ describe("browser notifications", () => {
 
     await page!.navigate(app.url("/porta/settings"));
     await installNotificationRecorder(page!);
-    await page!.click('input[aria-label="Browser Notifications"]');
+    await page!.waitFor(
+      `Boolean(document.querySelector('input[aria-label="ブラウザ通知"]'))`,
+      { timeoutMs: 10_000, description: "notification toggle to render" },
+    );
+    await page!.click('input[aria-label="ブラウザ通知"]');
 
     await page!.navigate(app.url("/porta/conv-run"));
     await installNotificationRecorder(page!);
@@ -189,7 +200,7 @@ describe("browser notifications", () => {
 
     await page!.waitFor(
       `window.__portaNotifications?.some((notification) =>
-        notification.title === "Porta job finished" &&
+        notification.title === "Porta: 実行が完了しました" &&
         notification.body === "I finished the requested notification check." &&
         notification.permission === "granted"
       )`,

@@ -28,15 +28,15 @@ describe("web e2e", () => {
 
     await page!.navigate(app.url("/"));
     await page!.waitForPath("/porta");
-    await page!.waitForText("Start a conversation");
+    await page!.waitForText("会話を始めましょう");
     await page!.waitFor(
-      `Boolean(document.querySelector('button[title="Select workspace"]'))`,
+      `Boolean(document.querySelector('button[title="ワークスペースを選択"]'))`,
       { timeoutMs: 10_000, description: "workspace selector to appear" },
     );
 
     expect(await page!.path()).toBe("/porta");
-    expect(await page!.exists('button[title="Select workspace"]')).toBe(true);
-    expect(await page!.bodyText()).toContain("New Chat");
+    expect(await page!.exists('button[title="ワークスペースを選択"]')).toBe(true);
+    expect(await page!.bodyText()).toContain("新規チャット");
   });
 
   it("creates a conversation and renders the mocked assistant reply", async () => {
@@ -66,7 +66,7 @@ describe("web e2e", () => {
     await page!.waitForPath("/porta/conv-1");
     await page!.waitForText(prompt);
     await page!.waitForText(`Mock response for: ${prompt}`);
-    await page!.waitForText("Implementation plan");
+    await page!.waitForText("思考プロセス");
 
     expect(await page!.count(".message.user")).toBe(1);
     expect(await page!.count(".message.assistant")).toBe(1);

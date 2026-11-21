@@ -485,6 +485,19 @@ describe("Sidebar", () => {
           lastModifiedTime: "",
           createdTime: "",
           trajectoryId: "t-ai-1",
+          assignedProjectId: "proj-ai",
+          workspaces: [{ workspaceFolderAbsoluteUri: "file:///Users/demo/AI" }],
+        },
+      },
+      {
+        id: "conv-recent-unassigned",
+        summary: {
+          summary: "未分類の通常チャット",
+          stepCount: 4,
+          status: "CASCADE_RUN_STATUS_IDLE",
+          lastModifiedTime: "2026-11-21T01:00:00.000Z",
+          createdTime: "2026-11-21T00:30:00.000Z",
+          trajectoryId: "t-recent-1",
           workspaces: [{ workspaceFolderAbsoluteUri: "file:///Users/demo/AI" }],
         },
       },
@@ -511,6 +524,8 @@ describe("Sidebar", () => {
     // AI appears once as a unified project folder containing its conversation directly
     expect(screen.getAllByText("AI")).toHaveLength(1);
     expect(screen.getByText("AI配下の実チャット")).toBeInTheDocument();
+    expect(screen.getByText("💬 最近のチャット")).toBeInTheDocument();
+    expect(screen.getByText("未分類の通常チャット")).toBeInTheDocument();
     expect(screen.queryByText(/NaN日前/)).not.toBeInTheDocument();
     expect(screen.getByText("CLI Project")).toBeInTheDocument();
     expect(screen.getByText("まだ会話はありません")).toBeInTheDocument();
@@ -772,7 +787,7 @@ describe("Sidebar", () => {
       },
     ];
 
-    render(
+    const { rerender } = render(
       <Sidebar
         conversations={conversations}
         activeId="conv-pinned-in-proj"
@@ -791,5 +806,56 @@ describe("Sidebar", () => {
     expect(screen.getAllByText("ピン留め済みプロジェクトチャット")).toHaveLength(1);
     expect(screen.getAllByText("実行中プロジェクトチャット")).toHaveLength(1);
     expect(screen.getAllByText("通常プロジェクトチャット")).toHaveLength(1);
+
+    // Order must follow standard AI app layout: 実行中 -> プロジェクト -> ピン留め
+    const runningSection = screen.getByText("⚡ 実行中");
+    const projectsSection = screen.getByTestId("sidebar-projects");
+    const projectItem = screen.getByText("アプリ開発");
+    const pinnedSection = screen.getByText("📌 ピン留め");
+    expect(
+      runningSection.compareDocumentPosition(projectsSection) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      projectsSection.compareDocumentPosition(projectItem) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      projectItem.compareDocumentPosition(pinnedSection) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // When the running chat finishes (IDLE), ⚡ 実行中 disappears and it returns under its original project
+    const finishedConversations: ConversationEntry[] = conversations.map((c) =>
+      c.id === "conv-running-in-proj"
+        ? {
+            ...c,
+            summary: {
+              ...c.summary,
+              assignedProjectId: "proj-dev",
+              status: "CASCADE_RUN_STATUS_IDLE",
+            },
+          }
+        : c,
+    );
+    rerender(
+      <Sidebar
+        conversations={finishedConversations}
+        activeId="conv-pinned-in-proj"
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onSettings={vi.fn()}
+        loading={false}
+        connected={true}
+        isOpen={true}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("⚡ 実行中")).not.toBeInTheDocument();
+    const returnedChat = screen.getByText("実行中プロジェクトチャット");
+    const projectGroupEl = screen.getByText("アプリ開発").closest('[data-project-id="proj-dev"]');
+    expect(projectGroupEl).not.toBeNull();
+    expect(projectGroupEl?.contains(returnedChat)).toBe(true);
   });
 });

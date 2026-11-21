@@ -22,6 +22,13 @@ import {
   type ResolvedPlannerType,
 } from "../utils/autoPlanner";
 import { DEFAULT_MODEL } from "../constants";
+import {
+  filterPromptTemplates,
+  getAllPromptTemplates,
+  loadCustomPromptTemplates,
+  saveCustomPromptTemplates,
+  type PromptTemplateItem,
+} from "../utils/promptTemplates";
 const ALLOWED_TYPES = [
   "image/png",
   "image/jpeg",
@@ -60,6 +67,11 @@ interface Props {
   onPermissionPolicyChange?: (policy: LocalPermissionPolicy) => void;
   /** App edition tier ("lite" = Gemini-only, "pro" = Multi-AI). */
   appTier?: import("../types").AppTier;
+  /** Active project's custom instructions (optional, ChatGPT/Claude Projects style). */
+  activeProjectInstruction?: {
+    projectName: string;
+    instructions: string;
+  } | null;
 }
 
 interface AttachmentPreview {
@@ -381,7 +393,73 @@ export function ChatInput({
   permissionPolicy = "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER",
   onPermissionPolicyChange,
   appTier = "lite",
+  activeProjectInstruction = null,
 }: Props) {
+  const [slashMenuManualOpen, setSlashMenuManualOpen] = useState(false);
+  const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplateItem[]>(
+    () => getAllPromptTemplates(),
+  );
+  const [addingTemplate, setAddingTemplate] = useState(false);
+  const [newTplCmd, setNewTplCmd] = useState("");
+  const [newTplLabel, setNewTplLabel] = useState("");
+  const [newTplBody, setNewTplBody] = useState("");
+  const [projectInstructionEnabled, setProjectInstructionEnabled] =
+    useState(true);
+  const slashMenuRef = useRef<HTMLDivElement>(null);
+
+  const slashAutoTrigger = /^\/[^\s\n]*$/.test(draft);
+  const slashMenuOpen = slashMenuManualOpen || slashAutoTrigger;
+  const filteredTemplates = filterPromptTemplates(
+    slashAutoTrigger ? draft : "",
+    promptTemplates,
+  );
+
+  const applyPromptTemplate = useCallback(
+    (item: PromptTemplateItem) => {
+      onDraftChange(item.template);
+      setSlashMenuManualOpen(false);
+      setAddingTemplate(false);
+      setSlashSelectedIdx(0);
+      setTimeout(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.style.height = "auto";
+          el.style.height = Math.min(el.scrollHeight, 200) + "px";
+          el.setSelectionRange(item.template.length, item.template.length);
+        }
+      }, 0);
+    },
+    [onDraftChange],
+  );
+
+  const handleSaveCustomTemplate = () => {
+    const rawCmd = newTplCmd.trim();
+    const body = newTplBody.trim();
+    if (!rawCmd || !body) return;
+    const command = rawCmd.startsWith("/") ? rawCmd : `/${rawCmd}`;
+    const item: PromptTemplateItem = {
+      id: `custom-${Date.now().toString(36)}`,
+      command,
+      label: newTplLabel.trim() || command.slice(1),
+      description: body.slice(0, 48),
+      template: body.endsWith("\n") ? body : `${body}\n\n`,
+    };
+    const nextCustom = [item, ...loadCustomPromptTemplates()];
+    saveCustomPromptTemplates(nextCustom);
+    setPromptTemplates(getAllPromptTemplates());
+    setNewTplCmd("");
+    setNewTplLabel("");
+    setNewTplBody("");
+    setAddingTemplate(false);
+  };
+
+  const handleDeleteCustomTemplate = (id: string) => {
+    const nextCustom = loadCustomPromptTemplates().filter((t) => t.id !== id);
+    saveCustomPromptTemplates(nextCustom);
+    setPromptTemplates(getAllPromptTemplates());
+  };
   const effectiveDefault = defaultModel ?? DEFAULT_MODEL;
   const [model, setModel] = useState<string | null>(
     conversationModel ?? effectiveDefault,
@@ -836,7 +914,16 @@ export function ChatInput({
       }
 
       const resolvedPlanner = resolvePlannerType(plannerType, trimmed);
-      onSend(trimmed || " ", model, media, resolvedPlanner);
+      let outgoingText = trimmed || " ";
+      if (
+        !conversationId &&
+        activeProjectInstruction?.instructions &&
+        projectInstructionEnabled &&
+        trimmed
+      ) {
+        outgoingText = `【プロジェクト専用指示: ${activeProjectInstruction.projectName}】\n${activeProjectInstruction.instructions}\n\n---\n\n${trimmed}`;
+      }
+      onSend(outgoingText, model, media, resolvedPlanner);
       onDraftChange("");
       attachments.forEach((attachment) => {
         URL.revokeObjectURL(attachment.dataUrl);
@@ -865,6 +952,9 @@ export function ChatInput({
     plannerType,
     onDraftChange,
     showFileError,
+    conversationId,
+    activeProjectInstruction,
+    projectInstructionEnabled,
   ]);
 
   const inputDisabled = disabled || isPreparingAttachments;
@@ -886,7 +976,34 @@ export function ChatInput({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       isComposingRef.current = false;
+      if (slashMenuOpen) {
+        setSlashMenuManualOpen(false);
+        setAddingTemplate(false);
+      }
       return;
+    }
+    if (slashMenuOpen && !addingTemplate && filteredTemplates.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashSelectedIdx((i) => (i + 1) % filteredTemplates.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashSelectedIdx(
+          (i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length,
+        );
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && slashAutoTrigger)) {
+        const picked =
+          filteredTemplates[slashSelectedIdx % filteredTemplates.length];
+        if (picked) {
+          e.preventDefault();
+          applyPromptTemplate(picked);
+          return;
+        }
+      }
     }
     // Never send on Enter while Japanese/CJK IME composition is active
     // or during the brief post-compositionend window on macOS WebKit/Chromium.
@@ -1060,11 +1177,124 @@ export function ChatInput({
           }
         }}
       >
-        <div className="chat-input-top">
+        <div className="chat-input-top" style={{ position: "relative" }}>
+          {!conversationId && activeProjectInstruction?.instructions && (
+            <div className="chat-project-instruction-pill">
+              <button
+                type="button"
+                className={`chat-project-instruction-toggle ${projectInstructionEnabled ? "on" : "off"}`}
+                onClick={() => setProjectInstructionEnabled((v) => !v)}
+                title={activeProjectInstruction.instructions}
+              >
+                📝 {activeProjectInstruction.projectName} の専用指示:{" "}
+                {projectInstructionEnabled ? "適用ON" : "一時OFF"}
+              </button>
+            </div>
+          )}
+          {slashMenuOpen && (
+            <div
+              className="slash-command-popover"
+              ref={slashMenuRef}
+              data-testid="slash-command-popover"
+            >
+              <div className="slash-command-head">
+                <span>⚡ プロンプト＆スラッシュコマンド</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="slash-command-head-btn"
+                    onClick={() => setAddingTemplate((v) => !v)}
+                  >
+                    {addingTemplate ? "一覧へ戻る" : "＋ 自作を追加"}
+                  </button>
+                  <button
+                    type="button"
+                    className="slash-command-head-btn"
+                    onClick={() => {
+                      setSlashMenuManualOpen(false);
+                      setAddingTemplate(false);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+              {addingTemplate ? (
+                <div className="slash-command-add-form">
+                  <div className="slash-command-add-row">
+                    <input
+                      type="text"
+                      className="ext-input"
+                      placeholder="/コマンド名（例: /日報）"
+                      value={newTplCmd}
+                      onChange={(e) => setNewTplCmd(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="ext-input"
+                      placeholder="表示名（例: 日報作成）"
+                      value={newTplLabel}
+                      onChange={(e) => setNewTplLabel(e.target.value)}
+                    />
+                  </div>
+                  <textarea
+                    className="ext-textarea"
+                    rows={3}
+                    placeholder="呼び出した時に挿入するプロンプト本文…"
+                    value={newTplBody}
+                    onChange={(e) => setNewTplBody(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="settings-archive-btn primary"
+                    disabled={!newTplCmd.trim() || !newTplBody.trim()}
+                    onClick={handleSaveCustomTemplate}
+                  >
+                    テンプレートを保存
+                  </button>
+                </div>
+              ) : filteredTemplates.length === 0 ? (
+                <div className="slash-command-empty">
+                  一致するテンプレートはありません
+                </div>
+              ) : (
+                <div className="slash-command-list">
+                  {filteredTemplates.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      className={`slash-command-item ${idx === slashSelectedIdx % filteredTemplates.length ? "active" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        className="slash-command-pick-btn"
+                        onClick={() => applyPromptTemplate(item)}
+                      >
+                        <span className="slash-command-cmd">{item.command}</span>
+                        <span className="slash-command-label">{item.label}</span>
+                        <span className="slash-command-desc">
+                          {item.description}
+                        </span>
+                      </button>
+                      {!item.isBuiltin && (
+                        <button
+                          type="button"
+                          className="slash-command-del-btn"
+                          title="この自作テンプレートを削除"
+                          onClick={() => handleDeleteCustomTemplate(item.id)}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             className="chat-input"
-            placeholder="メッセージを入力..."
+            placeholder="メッセージを入力...（先頭に / で定型プロンプト）"
             value={draft}
             onChange={handleInput}
             onCompositionStart={handleCompositionStart}
@@ -1161,6 +1391,18 @@ export function ChatInput({
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              className={`chat-action-icon-btn ${slashMenuOpen ? "active" : ""}`}
+              onClick={() => setSlashMenuManualOpen((v) => !v)}
+              title="プロンプト集・スラッシュコマンドを開く (/)"
+              aria-label="プロンプト集を開く"
+              disabled={inputDisabled}
+              style={{ fontWeight: 700, fontSize: "14px" }}
+              data-testid="slash-command-trigger-btn"
+            >
+              /
+            </button>
             <input
               ref={fileInputRef}
               type="file"

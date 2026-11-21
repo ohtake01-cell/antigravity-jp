@@ -50,6 +50,7 @@ export interface RegisteredProject {
   name: string;
   folderUri?: string;
   folderPath?: string;
+  instructions?: string;
   isDefaultCli?: boolean;
 }
 
@@ -109,18 +110,25 @@ async function listRegisteredProjects(): Promise<RegisteredProject[]> {
         name?: string;
         sidecar?: unknown;
         projectResources?: { resources?: Array<{ folderUri?: string }> };
+        settings?: { instructions?: string };
       };
       // Skip internal sidecar entries (e.g., swarm/swarm_board), matching Antigravity sidebar
       if (!data.id || !data.name || data.sidecar) continue;
       const folderUri = data.projectResources?.resources?.find(
         (r) => typeof r?.folderUri === "string" && r.folderUri.length > 0,
       )?.folderUri;
+      const instructions =
+        typeof data.settings?.instructions === "string" &&
+        data.settings.instructions.trim().length > 0
+          ? data.settings.instructions.trim()
+          : undefined;
       projects.push({
         id: data.id,
         name: data.name,
         ...(folderUri
           ? { folderUri, folderPath: fileUriToLocalPath(folderUri) }
           : {}),
+        ...(instructions ? { instructions } : {}),
         ...(data.id === "default-cli-project" ? { isDefaultCli: true } : {}),
       });
     } catch {
@@ -292,7 +300,10 @@ export function registerWorkspaceRoutes(app: Hono): void {
       const body = (await c.req.json().catch(() => ({}))) as {
         name?: string;
         folderPath?: string;
+        instructions?: string;
       };
+      const rawInstructions =
+        typeof body.instructions === "string" ? body.instructions.trim() : "";
       const rawFolderPath =
         typeof body.folderPath === "string" ? body.folderPath.trim() : "";
       const rawName = typeof body.name === "string" ? body.name.trim() : "";
@@ -331,7 +342,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
           ? { resources: [{ folderUri }] }
           : {},
         permissionGrants: { v2Migrated: true },
-        settings: {},
+        settings: rawInstructions ? { instructions: rawInstructions } : {},
         isWorkspaceOnly: false,
       };
       await writeFile(
@@ -347,6 +358,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
         id,
         name,
         ...(folderUri ? { folderUri, folderPath: fileUriToLocalPath(folderUri) } : {}),
+        ...(rawInstructions ? { instructions: rawInstructions } : {}),
       };
       return c.json({ project }, 201);
     } catch (err) {
@@ -371,6 +383,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
       const body = (await c.req.json().catch(() => ({}))) as {
         name?: string;
         folderPath?: string;
+        instructions?: string;
         clearFolder?: boolean;
         createFolderIfMissing?: boolean;
         preserveConversationIds?: string[];
@@ -445,6 +458,24 @@ export function registerWorkspaceRoutes(app: Hono): void {
         nextFolderUri = oldFolderUri;
       }
 
+      const existingSettings =
+        existing.settings && typeof existing.settings === "object"
+          ? { ...(existing.settings as Record<string, unknown>) }
+          : {};
+      if (typeof body.instructions === "string") {
+        const trimmedInstr = body.instructions.trim();
+        if (trimmedInstr) {
+          existingSettings.instructions = trimmedInstr;
+        } else {
+          delete existingSettings.instructions;
+        }
+      }
+      const nextInstructions =
+        typeof existingSettings.instructions === "string" &&
+        existingSettings.instructions.trim().length > 0
+          ? existingSettings.instructions.trim()
+          : undefined;
+
       const updatedPayload = {
         ...existing,
         id,
@@ -452,6 +483,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
         projectResources: nextFolderUri
           ? { resources: [{ folderUri: nextFolderUri }] }
           : {},
+        settings: existingSettings,
       };
       await writeFile(
         targetPath,
@@ -480,6 +512,7 @@ export function registerWorkspaceRoutes(app: Hono): void {
         ...(nextFolderUri
           ? { folderUri: nextFolderUri, folderPath: fileUriToLocalPath(nextFolderUri) }
           : {}),
+        ...(nextInstructions ? { instructions: nextInstructions } : {}),
       };
       return c.json({ ok: true, project });
     } catch (err) {

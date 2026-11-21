@@ -3,10 +3,15 @@ import { IconMenu, IconFolder, IconSpinner } from "./Icons";
 import { AppTargetSelector } from "./AppTargetSelector";
 import { TokenQuotaBadge } from "./TokenQuotaBadge";
 import { formatCompactModelBadge, type CompactModelProvider } from "./Sidebar";
+import {
+  buildConversationMarkdown,
+  downloadMarkdownFile,
+} from "../utils/exportConversation";
 import type { TargetApp } from "../types";
 
 interface Props {
   title: string;
+  conversationId?: string;
   projectName?: string;
   modelLabel?: string;
   modelProvider?: CompactModelProvider;
@@ -29,6 +34,7 @@ interface Props {
 
 export function ChatHeader({
   title,
+  conversationId,
   projectName,
   modelLabel,
   modelProvider,
@@ -36,20 +42,32 @@ export function ChatHeader({
   onTargetAppChange,
   onMenuToggle,
   isRunning,
-  mode = "chat",
-  onModeChange,
   workbenchOpen = false,
   onToggleWorkbench,
-  agentPanelOpen = false,
-  onToggleAgentPanel,
-  agentCount = 0,
-  hasRunningAgent = false,
   onOpenPalette,
-  pendingApprovalsCount = 0,
-  runningAICount = 0,
 }: Props) {
   const headerBadge = formatCompactModelBadge(modelLabel, modelProvider);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+
+  const handleExportMarkdown = async (copyOnly = false) => {
+    if (!conversationId) return;
+    setExportStatus("出力中…");
+    try {
+      const md = await buildConversationMarkdown(conversationId, title);
+      if (copyOnly) {
+        await navigator.clipboard?.writeText(md);
+        setExportStatus("コピー済");
+      } else {
+        downloadMarkdownFile(title, md);
+        setExportStatus("保存済");
+      }
+      window.setTimeout(() => setExportStatus(null), 2000);
+    } catch {
+      setExportStatus("失敗");
+      window.setTimeout(() => setExportStatus(null), 2000);
+    }
+  };
 
   useEffect(() => {
     if (!mobileToolsOpen) return;
@@ -140,6 +158,21 @@ export function ChatHeader({
             title="右ペイン独立エディタ＆多形式ビューア (Markdown / CSV / PDF / Mermaid)"
           >
             📄 エディタ
+          </button>
+        )}
+        {conversationId && (
+          <button
+            type="button"
+            className="header-tool-btn header-desktop-only"
+            onClick={() => void handleExportMarkdown(false)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              void handleExportMarkdown(true);
+            }}
+            title="この会話を Markdown (.md) として保存（右クリックでクリップボードへコピー）"
+            data-testid="header-export-md-btn"
+          >
+            📤 {exportStatus ?? "出力"}
           </button>
         )}
         <div className="header-desktop-only">

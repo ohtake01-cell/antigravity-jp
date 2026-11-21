@@ -1,10 +1,209 @@
 import Cocoa
+import CryptoKit
 import IOKit.pwr_mgt
 import UserNotifications
 import WebKit
 
 private let defaultPort = "3470"
 private let defaultHost = "127.0.0.1"
+private let updateRepoOwner = "ohtake01-cell"
+private let updateRepoName = "antigravity-jp"
+private let updateReleasesPageURL = "https://github.com/\(updateRepoOwner)/\(updateRepoName)/releases"
+private let updateWebLatestURL = "https://github.com/\(updateRepoOwner)/\(updateRepoName)/releases/latest"
+private let autoUpdateDefaultsKey = "AGJPAutoUpdateCheckEnabled"
+
+private func currentAppVersion() -> String {
+    if let envVer = ProcessInfo.processInfo.environment["AG_JP_APP_VERSION"], !envVer.isEmpty {
+        return envVer.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "^v", with: "", options: .regularExpression)
+    }
+    if let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !ver.isEmpty {
+        return ver.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return "1.5.0"
+}
+
+private func parseSemver(_ raw: String) -> [Int] {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let withoutV = trimmed.hasPrefix("v") || trimmed.hasPrefix("V") ? String(trimmed.dropFirst()) : trimmed
+    let core = withoutV.split(separator: "-").first.map(String.init) ?? withoutV
+    let nums = core.split(separator: ".").map { Int($0) ?? 0 }
+    return [
+        nums.count > 0 ? nums[0] : 0,
+        nums.count > 1 ? nums[1] : 0,
+        nums.count > 2 ? nums[2] : 0,
+    ]
+}
+
+private func compareSemver(_ a: String, _ b: String) -> Int {
+    let pa = parseSemver(a)
+    let pb = parseSemver(b)
+    for i in 0..<3 {
+        if pa[i] > pb[i] { return 1 }
+        if pa[i] < pb[i] { return -1 }
+    }
+    return 0
+}
+
+private func computeFileSHA256(at url: URL) throws -> String {
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while true {
+        let chunk = handle.readData(ofLength: 1_048_576)
+        if chunk.isEmpty { break }
+        hasher.update(data: chunk)
+    }
+    let digest = hasher.finalize()
+    return digest.map { String(format: "%02x", $0) }.joined()
+}
+
+private func runSubprocessSync(_ executable: String, arguments: [String]) -> (status: Int32, output: String) {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: executable)
+    proc.arguments = arguments
+    let pipe = Pipe()
+    proc.standardOutput = pipe
+    proc.standardError = pipe
+    do {
+        try proc.run()
+        proc.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let out = String(data: data, encoding: .utf8) ?? ""
+        return (proc.terminationStatus, out)
+    } catch {
+        return (-1, error.localizedDescription)
+    }
+}
+
+private final class ZipDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let destinationURL: URL
+    private let onProgress: @Sendable (Int64, Int64) -> Void
+    private var continuation: CheckedContinuation<URL, Error>?
+    private var lastProgressPush = Date.distantPast
+    private let lock = NSLock()
+
+    init(destinationURL: URL, onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
+        self.destinationURL = destinationURL
+        self.onProgress = onProgress
+    }
+
+    func start(url: URL, userAgent: String) async throws -> URL {
+        return try await withCheckedThrowingContinuation { cont in
+            lock.lock()
+            self.continuation = cont
+            lock.unlock()
+            let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 300
+            req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            let task = session.downloadTask(with: req)
+            task.resume()
+        }
+    }
+
+    private func finishOnce(_ result: Result<URL, Error>, session: URLSession) {
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        lock.unlock()
+        session.finishTasksAndInvalidate()
+        guard let cont else { return }
+        switch result {
+        case .success(let u): cont.resume(returning: u)
+        case .failure(let e): cont.resume(throwing: e)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        let now = Date()
+        if now.timeIntervalSince(lastProgressPush) >= 0.15 || totalBytesWritten == totalBytesExpectedToWrite {
+            lastProgressPush = now
+            onProgress(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        if let http = downloadTask.response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let err = NSError(
+                domain: "AntigravityJPUpdater",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "ダウンロードに失敗しました (HTTP \(http.statusCode))"]
+            )
+            finishOnce(.failure(err), session: session)
+            return
+        }
+        let fm = FileManager.default
+        do {
+            if fm.fileExists(atPath: destinationURL.path) {
+                try fm.removeItem(at: destinationURL)
+            }
+            try fm.moveItem(at: location, to: destinationURL)
+            finishOnce(.success(destinationURL), session: session)
+        } catch {
+            finishOnce(.failure(error), session: session)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            finishOnce(.failure(error), session: session)
+        }
+    }
+}
+
+private struct UpdateState {
+    var currentVersion: String
+    var latestVersion: String?
+    var updateAvailable: Bool = false
+    var canAutoInstall: Bool = false
+    var autoInstallBlockedReason: String?
+    var phase: String = "idle"
+    var progress: Double = 0
+    var downloadedBytes: Int64 = 0
+    var totalBytes: Int64 = 0
+    var releaseName: String?
+    var releaseNotes: String?
+    var releaseUrl: String = updateReleasesPageURL
+    var downloadUrl: String?
+    var expectedSha256: String?
+    var autoCheckEnabled: Bool = true
+    var message: String?
+    var error: String?
+
+    func toJSONDictionary() -> [String: Any] {
+        var dict: [String: Any] = [
+            "isNativeApp": true,
+            "currentVersion": currentVersion,
+            "updateAvailable": updateAvailable,
+            "canAutoInstall": canAutoInstall,
+            "phase": phase,
+            "progress": progress,
+            "downloadedBytes": downloadedBytes,
+            "totalBytes": totalBytes,
+            "releaseUrl": releaseUrl,
+            "autoCheckEnabled": autoCheckEnabled,
+        ]
+        if let v = latestVersion { dict["latestVersion"] = v }
+        if let v = autoInstallBlockedReason { dict["autoInstallBlockedReason"] = v }
+        if let v = releaseName { dict["releaseName"] = v }
+        if let v = releaseNotes { dict["releaseNotes"] = v }
+        if let v = downloadUrl { dict["downloadUrl"] = v }
+        if let v = expectedSha256 { dict["expectedSha256"] = v }
+        if let v = message { dict["message"] = v }
+        if let v = error { dict["error"] = v }
+        return dict
+    }
+}
 
 private struct AppConfig {
     let host: String
@@ -205,6 +404,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private weak var sleepMenuItem: NSMenuItem?
     private var isLoadingServer = false
     private var signalSources: [DispatchSourceSignal] = []
+    private var updateState = UpdateState(currentVersion: currentAppVersion())
+    private var isCheckingUpdate = false
+    private var isInstallingUpdate = false
 
     static func main() {
         let app = NSApplication.shared
@@ -216,12 +418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         config = resolveAppConfig()
+        initUpdateState()
         setupSignalHandlers()
         setupNotifications()
         setupMainMenu()
         setupWindow()
         showLoadingScreen(message: "Antigravity 日本語版を起動しています…", detail: "ローカルブリッジ接続を確認中")
         ensureServerAndLoad()
+        scheduleBackgroundUpdateCheck()
     }
 
     private func setupSignalHandlers() {
@@ -322,6 +526,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 let title = (payload["title"] as? String) ?? "Antigravity 日本語版"
                 let body = (payload["body"] as? String) ?? ""
                 self.postSystemNotification(title: title, body: body)
+            case "update-get-state":
+                self.pushUpdateStateToWebView()
+            case "update-check":
+                let showDialog = (payload["showDialog"] as? Bool) ?? false
+                self.checkForUpdates(showNativeDialogs: showDialog)
+            case "update-install":
+                self.installAvailableUpdate()
+            case "update-open-release":
+                if let url = URL(string: self.updateState.releaseUrl) {
+                    NSWorkspace.shared.open(url)
+                }
+            case "update-set-auto-check":
+                if let enabled = payload["enabled"] as? Bool {
+                    self.setAutoUpdateCheckEnabled(enabled)
+                }
             default:
                 break
             }
@@ -348,6 +567,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu(title: "Antigravity 日本語版")
         appMenu.addItem(withTitle: "Antigravity 日本語版について", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let checkUpdateItem = NSMenuItem(title: "アップデートを確認…", action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
+        checkUpdateItem.target = self
+        appMenu.addItem(checkUpdateItem)
         appMenu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "設定…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -536,6 +758,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         env["PORTA_PORT"] = config.port
         env["PORTA_WEB_DIST_DIR"] = webDist
         env["PORTA_STANDALONE_CORE"] = env["PORTA_STANDALONE_CORE"] ?? "true"
+        env["AG_JP_APP_VERSION"] = currentAppVersion()
         process.environment = env
 
         let logDir = "\(fm.homeDirectoryForCurrentUser.path)/Library/Logs/AntigravityJP"
@@ -635,7 +858,510 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.loadHTMLString(html, baseURL: nil)
     }
 
+    // MARK: - Auto Updater (GitHub Releases + Atomic Self-Replace)
+
+    private func evaluateAutoInstallCapability() -> (canInstall: Bool, reason: String?) {
+        let bundlePath = Bundle.main.bundlePath
+        guard bundlePath.hasSuffix(".app") else {
+            return (false, "アプリバンドル外から実行されているため、自動入れ替えできません。")
+        }
+        if bundlePath.contains("/AppTranslocation/") {
+            return (false, "一時領域から起動されています。アプリを「アプリケーション」フォルダへ移動してからお試しください。")
+        }
+        if bundlePath.hasPrefix("/Volumes/") {
+            return (false, "ディスクイメージ等から直接起動されています。「アプリケーション」フォルダへコピーしてからお試しください。")
+        }
+        let fm = FileManager.default
+        let parentDir = (bundlePath as NSString).deletingLastPathComponent
+        if !fm.isWritableFile(atPath: parentDir) || !fm.isWritableFile(atPath: bundlePath) {
+            return (false, "インストール先フォルダへの書き込み権限がないため、リリースページから手動で更新してください。")
+        }
+        return (true, nil)
+    }
+
+    private func initUpdateState() {
+        let defaults = UserDefaults.standard
+        let autoEnabled: Bool
+        if defaults.object(forKey: autoUpdateDefaultsKey) == nil {
+            autoEnabled = true
+        } else {
+            autoEnabled = defaults.bool(forKey: autoUpdateDefaultsKey)
+        }
+        let capability = evaluateAutoInstallCapability()
+        updateState = UpdateState(
+            currentVersion: currentAppVersion(),
+            canAutoInstall: capability.canInstall,
+            autoInstallBlockedReason: capability.reason,
+            autoCheckEnabled: autoEnabled
+        )
+    }
+
+    private func setAutoUpdateCheckEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: autoUpdateDefaultsKey)
+        updateState.autoCheckEnabled = enabled
+        pushUpdateStateToWebView()
+    }
+
+    private func scheduleBackgroundUpdateCheck() {
+        guard updateState.autoCheckEnabled else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard self.updateState.autoCheckEnabled else { return }
+            self.checkForUpdates(showNativeDialogs: false)
+        }
+    }
+
+    @objc private func checkForUpdatesFromMenu() {
+        checkForUpdates(showNativeDialogs: true)
+    }
+
+    private func pushUpdateStateToWebView() {
+        guard let webView else { return }
+        let dict = updateState.toJSONDictionary()
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        let js = """
+        window.__AG_JP_UPDATE_STATE__ = \(json);
+        window.dispatchEvent(new CustomEvent('antigravity-jp:update-status', { detail: \(json) }));
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    private func checkForUpdates(showNativeDialogs: Bool) {
+        guard !isCheckingUpdate, !isInstallingUpdate else {
+            pushUpdateStateToWebView()
+            return
+        }
+        isCheckingUpdate = true
+        let capability = evaluateAutoInstallCapability()
+        updateState.canAutoInstall = capability.canInstall
+        updateState.autoInstallBlockedReason = capability.reason
+        updateState.phase = "checking"
+        updateState.error = nil
+        updateState.message = "最新バージョンを確認しています…"
+        pushUpdateStateToWebView()
+
+        let currentVer = updateState.currentVersion
+        let apiUrlStr = ProcessInfo.processInfo.environment["AG_JP_UPDATE_API_URL"]
+            ?? "https://api.github.com/repos/\(updateRepoOwner)/\(updateRepoName)/releases/latest"
+
+        Task { @MainActor in
+            defer { self.isCheckingUpdate = false }
+
+            do {
+                let fetched = try await Self.fetchLatestReleaseMetadata(
+                    apiUrlString: apiUrlStr,
+                    currentVersion: currentVer
+                )
+                let isNewer = compareSemver(fetched.latestVersion, currentVer) > 0
+                self.updateState.latestVersion = fetched.latestVersion
+                self.updateState.updateAvailable = isNewer
+                self.updateState.releaseName = fetched.releaseName
+                self.updateState.releaseNotes = fetched.releaseNotes
+                self.updateState.releaseUrl = fetched.releaseUrl
+                self.updateState.downloadUrl = fetched.zipDownloadUrl
+                self.updateState.expectedSha256 = fetched.zipSha256
+                self.updateState.error = nil
+
+                if isNewer {
+                    self.updateState.phase = "available"
+                    self.updateState.message = "新しいバージョン v\(fetched.latestVersion) が利用可能です。"
+                } else {
+                    self.updateState.phase = "up_to_date"
+                    self.updateState.message = "最新バージョン（v\(currentVer)）をお使いです。"
+                }
+                self.pushUpdateStateToWebView()
+
+                if showNativeDialogs {
+                    self.presentUpdateResultAlert(isNewer: isNewer)
+                }
+            } catch {
+                self.updateState.phase = "error"
+                self.updateState.error = error.localizedDescription
+                self.updateState.message = "アップデートの確認に失敗しました。"
+                self.pushUpdateStateToWebView()
+
+                if showNativeDialogs {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "アップデートを確認できませんでした"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "閉じる")
+                    alert.addButton(withTitle: "リリースページを開く")
+                    if alert.runModal() == .alertSecondButtonReturn,
+                       let url = URL(string: self.updateState.releaseUrl)
+                    {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        }
+    }
+
+    private func presentUpdateResultAlert(isNewer: Bool) {
+        let alert = NSAlert()
+        if isNewer, let latest = updateState.latestVersion {
+            alert.alertStyle = .informational
+            alert.messageText = "Antigravity 日本語版 v\(latest) が利用可能です"
+            let baseMsg = "現在お使いのバージョン: v\(updateState.currentVersion)\n新しいバージョン: v\(latest)\nチャット履歴や設定はそのまま引き継がれます。"
+            if updateState.canAutoInstall && updateState.downloadUrl != nil {
+                alert.informativeText = baseMsg
+                alert.addButton(withTitle: "今すぐアップデートして再起動")
+                alert.addButton(withTitle: "リリースページを開く")
+                alert.addButton(withTitle: "後で")
+                let resp = alert.runModal()
+                if resp == .alertFirstButtonReturn {
+                    installAvailableUpdate()
+                } else if resp == .alertSecondButtonReturn,
+                          let url = URL(string: updateState.releaseUrl)
+                {
+                    NSWorkspace.shared.open(url)
+                }
+            } else {
+                alert.informativeText = baseMsg + "\n\n" + (updateState.autoInstallBlockedReason ?? "")
+                alert.addButton(withTitle: "リリースページを開く")
+                alert.addButton(withTitle: "後で")
+                if alert.runModal() == .alertFirstButtonReturn,
+                   let url = URL(string: updateState.releaseUrl)
+                {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        } else {
+            alert.alertStyle = .informational
+            alert.messageText = "Antigravity 日本語版は最新版です"
+            alert.informativeText = "現在のバージョン: v\(updateState.currentVersion)"
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
+    private struct FetchedReleaseMetadata: Sendable {
+        let latestVersion: String
+        let releaseName: String
+        let releaseNotes: String?
+        let releaseUrl: String
+        let zipDownloadUrl: String?
+        let zipSha256: String?
+    }
+
+    nonisolated private static func fetchLatestReleaseMetadata(
+        apiUrlString: String,
+        currentVersion: String
+    ) async throws -> FetchedReleaseMetadata {
+        guard let apiURL = URL(string: apiUrlString) else {
+            throw NSError(domain: "AntigravityJPUpdater", code: -1, userInfo: [NSLocalizedDescriptionKey: "アップデート確認URLが不正です"])
+        }
+        var req = URLRequest(url: apiURL)
+        req.timeoutInterval = 12
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Antigravity-JP/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse {
+            if (200...299).contains(http.statusCode) {
+                guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tagRaw = obj["tag_name"] as? String,
+                      !tagRaw.isEmpty
+                else {
+                    throw NSError(domain: "AntigravityJPUpdater", code: -2, userInfo: [NSLocalizedDescriptionKey: "リリース情報の形式が不正です"])
+                }
+                let latestVer = tagRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "^v", with: "", options: .regularExpression)
+                let releaseName = (obj["name"] as? String) ?? "Antigravity 日本語版 v\(latestVer)"
+                let releaseNotes = obj["body"] as? String
+                let releaseUrl = (obj["html_url"] as? String) ?? updateReleasesPageURL
+
+                var zipUrl: String?
+                var zipSha: String?
+                if let assets = obj["assets"] as? [[String: Any]] {
+                    for asset in assets {
+                        guard let name = asset["name"] as? String,
+                              let dl = asset["browser_download_url"] as? String
+                        else { continue }
+                        if name == "Antigravity-JP-macOS.zip"
+                            || (name.hasSuffix(".zip") && name.lowercased().contains("macos"))
+                        {
+                            zipUrl = dl
+                            if let digest = asset["digest"] as? String,
+                               digest.lowercased().hasPrefix("sha256:")
+                            {
+                                let hex = String(digest.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                                if hex.count == 64 {
+                                    zipSha = hex
+                                }
+                            }
+                            break
+                        }
+                    }
+                }
+                return FetchedReleaseMetadata(
+                    latestVersion: latestVer,
+                    releaseName: releaseName,
+                    releaseNotes: releaseNotes,
+                    releaseUrl: releaseUrl,
+                    zipDownloadUrl: zipUrl,
+                    zipSha256: zipSha
+                )
+            }
+
+            // API レート制限時は Web の /releases/latest リダイレクトからタグ名をフォールバック取得
+            if http.statusCode == 403 || http.statusCode == 429 {
+                if let webURL = URL(string: updateWebLatestURL) {
+                    var headReq = URLRequest(url: webURL)
+                    headReq.httpMethod = "HEAD"
+                    headReq.timeoutInterval = 12
+                    headReq.setValue("Antigravity-JP/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+                    let (_, webResp) = try await URLSession.shared.data(for: headReq)
+                    if let finalUrl = webResp.url?.absoluteString,
+                       let range = finalUrl.range(of: "/releases/tag/")
+                    {
+                        let tag = String(finalUrl[range.upperBound...]).split(separator: "?").first.map(String.init) ?? ""
+                        if !tag.isEmpty {
+                            let latestVer = tag.replacingOccurrences(of: "^v", with: "", options: .regularExpression)
+                            let dl = "https://github.com/\(updateRepoOwner)/\(updateRepoName)/releases/download/\(tag)/Antigravity-JP-macOS.zip"
+                            return FetchedReleaseMetadata(
+                                latestVersion: latestVer,
+                                releaseName: "Antigravity 日本語版 v\(latestVer)",
+                                releaseNotes: nil,
+                                releaseUrl: finalUrl,
+                                zipDownloadUrl: dl,
+                                zipSha256: nil
+                            )
+                        }
+                    }
+                }
+            }
+
+            throw NSError(
+                domain: "AntigravityJPUpdater",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "GitHub Releases への接続に失敗しました (HTTP \(http.statusCode))"]
+            )
+        }
+        throw NSError(domain: "AntigravityJPUpdater", code: -3, userInfo: [NSLocalizedDescriptionKey: "不明な通信応答を受信しました"])
+    }
+
+    private func installAvailableUpdate() {
+        guard !isInstallingUpdate else { return }
+        guard let dlString = updateState.downloadUrl, let dlURL = URL(string: dlString) else {
+            if let url = URL(string: updateState.releaseUrl) {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
+        let capability = evaluateAutoInstallCapability()
+        updateState.canAutoInstall = capability.canInstall
+        updateState.autoInstallBlockedReason = capability.reason
+        guard capability.canInstall else {
+            updateState.phase = "error"
+            updateState.error = capability.reason ?? "自動入れ替えできない配置です。"
+            pushUpdateStateToWebView()
+            if let url = URL(string: updateState.releaseUrl) {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
+
+        isInstallingUpdate = true
+        updateState.phase = "downloading"
+        updateState.progress = 0
+        updateState.downloadedBytes = 0
+        updateState.totalBytes = 0
+        updateState.error = nil
+        updateState.message = "アップデートをダウンロードしています…"
+        pushUpdateStateToWebView()
+
+        let currentVer = updateState.currentVersion
+        let expectedSha = updateState.expectedSha256
+        let targetAppPath = Bundle.main.bundlePath
+        let serverPort = config.port
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ag-jp-update-\(UUID().uuidString)", isDirectory: true)
+        let zipDestURL = workDir.appendingPathComponent("Antigravity-JP-macOS.zip")
+        let extractDir = workDir.appendingPathComponent("extracted", isDirectory: true)
+
+        Task { @MainActor in
+            do {
+                try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+                let delegate = ZipDownloadDelegate(destinationURL: zipDestURL) { written, total in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        self.updateState.downloadedBytes = written
+                        self.updateState.totalBytes = max(total, 0)
+                        if total > 0 {
+                            self.updateState.progress = min(1.0, max(0.0, Double(written) / Double(total)))
+                        }
+                        self.pushUpdateStateToWebView()
+                    }
+                }
+                _ = try await delegate.start(url: dlURL, userAgent: "Antigravity-JP/\(currentVer)")
+
+                self.updateState.phase = "verifying"
+                self.updateState.progress = 1.0
+                self.updateState.message = "パッケージを展開・検証しています…"
+                self.pushUpdateStateToWebView()
+
+                let verifiedAppPath: String = try await Task.detached(priority: .userInitiated) {
+                    if let expectedSha, !expectedSha.isEmpty {
+                        let actualSha = try computeFileSHA256(at: zipDestURL)
+                        if actualSha != expectedSha.lowercased() {
+                            throw NSError(
+                                domain: "AntigravityJPUpdater",
+                                code: -10,
+                                userInfo: [NSLocalizedDescriptionKey: "ダウンロードファイルの整合性検証 (SHA-256) に失敗しました。もう一度お試しください。"]
+                            )
+                        }
+                    }
+
+                    let fm = FileManager.default
+                    try fm.createDirectory(at: extractDir, withIntermediateDirectories: true)
+                    let unzipRes = runSubprocessSync("/usr/bin/ditto", arguments: ["-x", "-k", zipDestURL.path, extractDir.path])
+                    if unzipRes.status != 0 {
+                        throw NSError(
+                            domain: "AntigravityJPUpdater",
+                            code: Int(unzipRes.status),
+                            userInfo: [NSLocalizedDescriptionKey: "ZIP の展開に失敗しました: \(unzipRes.output)"]
+                        )
+                    }
+
+                    // トップレベルまたは1階層サブフォルダ（例: "Antigravity 日本語版/Antigravity日本語版.app"）から .app を検出
+                    var candidateApps: [String] = []
+                    let topItems = try fm.contentsOfDirectory(atPath: extractDir.path)
+                    for item in topItems {
+                        if item.hasPrefix(".") || item == "__MACOSX" { continue }
+                        let full = extractDir.appendingPathComponent(item).path
+                        if item.hasSuffix(".app") {
+                            candidateApps.append(full)
+                        } else {
+                            var isDir: ObjCBool = false
+                            if fm.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue,
+                               let subItems = try? fm.contentsOfDirectory(atPath: full)
+                            {
+                                for sub in subItems where sub.hasSuffix(".app") {
+                                    candidateApps.append((full as NSString).appendingPathComponent(sub))
+                                }
+                            }
+                        }
+                    }
+                    let preferredApp = candidateApps.first {
+                        ($0 as NSString).lastPathComponent == "Antigravity日本語版.app"
+                    } ?? candidateApps.first
+                    guard let newAppPath = preferredApp else {
+                        throw NSError(
+                            domain: "AntigravityJPUpdater",
+                            code: -11,
+                            userInfo: [NSLocalizedDescriptionKey: "展開したパッケージ内に .app が見つかりませんでした。"]
+                        )
+                    }
+
+                    // 展開した新アプリの必須バイナリ＆署名を事前検証
+                    let execPath = "\(newAppPath)/Contents/MacOS/AntigravityJP"
+                    let nodePath = "\(newAppPath)/Contents/Resources/runtime/bin/node"
+                    let proxyEntry = "\(newAppPath)/Contents/Resources/runtime/proxy/dist/index.js"
+                    guard fm.isExecutableFile(atPath: execPath),
+                          fm.isExecutableFile(atPath: nodePath),
+                          fm.fileExists(atPath: proxyEntry)
+                    else {
+                        throw NSError(
+                            domain: "AntigravityJPUpdater",
+                            code: -12,
+                            userInfo: [NSLocalizedDescriptionKey: "新しいアプリの必須ファイルが不足しているため更新を中止しました。"]
+                        )
+                    }
+
+                    let signRes = runSubprocessSync("/usr/bin/codesign", arguments: ["--verify", "--deep", "--strict", newAppPath])
+                    if signRes.status != 0 {
+                        throw NSError(
+                            domain: "AntigravityJPUpdater",
+                            code: Int(signRes.status),
+                            userInfo: [NSLocalizedDescriptionKey: "新しいアプリの署名検証に失敗しました: \(signRes.output)"]
+                        )
+                    }
+
+                    _ = runSubprocessSync("/usr/bin/xattr", arguments: ["-dr", "com.apple.quarantine", newAppPath])
+                    return newAppPath
+                }.value
+
+                self.updateState.phase = "restarting"
+                self.updateState.message = "アプリを入れ替えて再起動しています…"
+                self.pushUpdateStateToWebView()
+
+                let scriptURL = workDir.appendingPathComponent("apply-update.sh")
+                let scriptBody = """
+                #!/bin/sh
+                set -eu
+                PARENT_PID="$1"
+                TARGET_APP="$2"
+                NEW_APP="$3"
+                WORK_DIR="$4"
+                PORT="$5"
+                BACKUP_APP="${TARGET_APP}.bak.$$"
+
+                i=0
+                while kill -0 "$PARENT_PID" 2>/dev/null && [ "$i" -lt 100 ]; do
+                  sleep 0.1
+                  i=$((i + 1))
+                done
+
+                if [ -n "$PORT" ] && command -v lsof >/dev/null 2>&1; then
+                  PIDS=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true)
+                  for p in $PIDS; do
+                    kill -TERM "$p" 2>/dev/null || true
+                  done
+                  sleep 0.3
+                fi
+
+                rm -rf "$BACKUP_APP" 2>/dev/null || true
+                mv "$TARGET_APP" "$BACKUP_APP"
+                if mv "$NEW_APP" "$TARGET_APP"; then
+                  rm -rf "$BACKUP_APP" "$WORK_DIR" 2>/dev/null || true
+                else
+                  mv "$BACKUP_APP" "$TARGET_APP" 2>/dev/null || true
+                  rm -rf "$WORK_DIR" 2>/dev/null || true
+                  exit 1
+                fi
+
+                open -n "$TARGET_APP"
+                """
+                try scriptBody.write(to: scriptURL, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+                self.stopManagedServer()
+
+                let helper = Process()
+                helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+                helper.arguments = [
+                    scriptURL.path,
+                    String(ProcessInfo.processInfo.processIdentifier),
+                    targetAppPath,
+                    verifiedAppPath,
+                    workDir.path,
+                    serverPort,
+                ]
+                helper.standardInput = FileHandle.nullDevice
+                helper.standardOutput = FileHandle.nullDevice
+                helper.standardError = FileHandle.nullDevice
+                try helper.run()
+
+                NSApp.terminate(nil)
+            } catch {
+                try? FileManager.default.removeItem(at: workDir)
+                self.isInstallingUpdate = false
+                self.updateState.phase = "error"
+                self.updateState.error = error.localizedDescription
+                self.updateState.message = "アップデートに失敗しました。"
+                self.pushUpdateStateToWebView()
+            }
+        }
+    }
+
     // MARK: - WKNavigationDelegate / WKUIDelegate
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        pushUpdateStateToWebView()
+    }
 
     func webView(
         _ webView: WKWebView,

@@ -28,6 +28,11 @@ import { registerVoiceRoutes } from "./routes/voice.js";
 import { registerJpRuleRoutes } from "./routes/jpRule.js";
 import { registerPermissionAndVoiceRoutes } from "./routes/permissions.js";
 import { registerProviderRoutes } from "./routes/providers.js";
+import { registerExtensionRoutes } from "./routes/extensions.js";
+import {
+  registerUpdateRoutes,
+  resolveCurrentAppVersion,
+} from "./routes/update.js";
 import {
   assertSupportedListenHost,
   formatListenAddress,
@@ -69,6 +74,7 @@ app.get("/api/health", async (c) => {
   return c.json({
     status: "ok",
     appName: "Antigravity 日本語版",
+    version: resolveCurrentAppVersion(),
     proxy: { port: PORT, uptime: process.uptime() },
     languageServers: instances.map((i) => ({
       pid: i.pid,
@@ -95,6 +101,8 @@ registerVoiceRoutes(app);
 registerJpRuleRoutes(app);
 registerPermissionAndVoiceRoutes(app);
 registerProviderRoutes(app);
+registerExtensionRoutes(app);
+registerUpdateRoutes(app);
 
 // ── ビルド済み Web UI の一体配信（単体起動モード） ──
 

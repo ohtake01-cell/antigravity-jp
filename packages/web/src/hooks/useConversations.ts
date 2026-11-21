@@ -10,7 +10,10 @@ export interface ConversationEntry {
 
 export function useConversations(intervalMs = 15_000) {
   const [hasAnyRunning, setHasAnyRunning] = useState(false);
-  const effectiveInterval = hasAnyRunning ? Math.min(intervalMs, 5_000) : intervalMs;
+  // 実行中は 3.5 秒、通常時も 7 秒で高速同期（タブ非表示時は usePolling が自動停止）
+  const effectiveInterval = hasAnyRunning
+    ? Math.min(intervalMs, 3_500)
+    : Math.min(intervalMs, 7_000);
   const { data, error, loading, refresh } = usePolling<ConversationsResponse>(
     api.conversations,
     effectiveInterval,

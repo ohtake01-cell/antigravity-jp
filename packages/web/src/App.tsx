@@ -12,6 +12,7 @@ import { ChatHeader } from "./components/ChatHeader";
 import { ChatPanel } from "./components/ChatPanel";
 import { ChatInput } from "./components/ChatInput";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { IconFolder } from "./components/Icons";
 
 // 初期チャット画面に不要な大型パネルは遅延ロードで初期バンドルを軽量化
@@ -46,6 +47,7 @@ import { useWorkspaces, slugFromUri } from "./hooks/useWorkspaces";
 import { useDraftText } from "./hooks/useDraftText";
 import { useChatActions } from "./hooks/useChatActions";
 import { useClientSettings, getAppIconUrl } from "./hooks/useClientSettings";
+import { useAppUpdate } from "./hooks/useAppUpdate";
 import { api } from "./api/client";
 import { isUnconfirmedOptimisticMessage } from "./utils/optimisticMessages";
 import type { NativeNotificationDeepLink } from "./utils/browserNotifications";
@@ -214,6 +216,7 @@ function ChatView() {
   );
   const { draftText, handleDraftChange } = useDraftText(activeId);
   const { settings, updateSettings } = useClientSettings();
+  const appUpdate = useAppUpdate();
   const appTier = settings.appTier ?? "lite";
   const isProTier = appTier === "pro";
 
@@ -750,6 +753,9 @@ function ChatView() {
       <div className="main-panel">
         <ChatHeader
           title={headerTitle}
+          conversationId={
+            !isSettingsPage && !isMultiAIPage ? (activeId ?? undefined) : undefined
+          }
           projectName={projectSlug ?? undefined}
           modelLabel={
             !isSettingsPage && !isMultiAIPage
@@ -777,6 +783,15 @@ function ChatView() {
           }}
           onOpenPalette={() => setPaletteOpen(true)}
         />
+        {appUpdate.showBanner && (
+          <UpdateBanner
+            state={appUpdate.state}
+            isBusy={appUpdate.isBusy}
+            onInstall={appUpdate.installUpdate}
+            onOpenRelease={appUpdate.openReleasePage}
+            onDismiss={appUpdate.dismissBanner}
+          />
+        )}
         {!isSettingsPage &&
           !isMultiAIPage &&
           activeId &&
@@ -971,6 +986,7 @@ function ChatView() {
               onUpdate={updateSettings}
               onBack={handleBackToChat}
               onRefreshConversations={refresh}
+              appUpdate={appUpdate}
               onOpenRestoredChat={(id, summary) => {
                 const uri = summary.workspaces?.[0]?.workspaceFolderAbsoluteUri;
                 const slug = uri ? slugFromUri(uri) : (projectSlug ?? "unknown");
@@ -1162,6 +1178,14 @@ function ChatView() {
               updateSettings({ localPermissionPolicy });
             }}
             appTier={appTier}
+            activeProjectInstruction={
+              pendingProject?.instructions
+                ? {
+                    projectName: pendingProject.name,
+                    instructions: pendingProject.instructions,
+                  }
+                : null
+            }
           />
         )}
       </div>

@@ -256,6 +256,7 @@ interface AskQuestionCardProps {
   step: TrajectoryStep;
   askQuestionRequest: AskQuestionRequest;
   fallbackStepIndex: number;
+  fallbackTrajectoryId?: string;
   onAskQuestion?: (
     trajectoryId: string,
     stepIndex: number,
@@ -270,10 +271,6 @@ function optionId(
   option: AskQuestionOption,
 ): string {
   return option.id ?? option.text ?? `${questionIndex}-${optionIndex}`;
-}
-
-function isWriteInOption(option: AskQuestionOption): boolean {
-  return /\b(other|custom|write)\b/i.test(option.text ?? "");
 }
 
 function responseFromQuestion(
@@ -298,6 +295,7 @@ export function AskQuestionCard({
   step,
   askQuestionRequest,
   fallbackStepIndex,
+  fallbackTrajectoryId,
   onAskQuestion,
 }: AskQuestionCardProps) {
   const questions = useMemo(
@@ -327,7 +325,9 @@ export function AskQuestionCard({
 
   const isWaiting = step.status === "CORTEX_STEP_STATUS_WAITING";
   const trajectoryId =
-    step.metadata?.sourceTrajectoryStepInfo?.trajectoryId ?? "";
+    step.metadata?.sourceTrajectoryStepInfo?.trajectoryId ??
+    fallbackTrajectoryId ??
+    "";
   const stepIndex =
     step.metadata?.sourceTrajectoryStepInfo?.stepIndex ?? fallbackStepIndex;
   const canRespond =
@@ -392,23 +392,34 @@ export function AskQuestionCard({
         <span className="step-card-icon">
           <IconMessageCircle size={12} />
         </span>
-        <span className="step-card-desc">確認・選択のリクエスト</span>
+        <span className="step-card-desc">
+          {isWaiting && !responded
+            ? "⏳ 確認・選択のリクエスト（回答待ち）"
+            : "確認・選択のリクエスト"}
+        </span>
       </div>
       <div className="ask-question-body">
         {questions.map((question, questionIndex) => {
           const options = question.options ?? [];
-          const selected = selectedByQuestion[questionIndex] ?? [];
+          const selected =
+            selectedByQuestion[questionIndex] ??
+            question.selectedOptionIds ??
+            [];
+          const currentWriteIn =
+            writeIns[questionIndex] ?? question.writeInResponse ?? "";
+          // Antigravity 本体の仕様通り、回答待ち時は常に「その他（自由記述）」欄を表示し、
+          // 完了後も自由記述の回答があれば表示する
           const showWriteIn =
-            options.length === 0 ||
-            options.some((option, optionIndex) => {
-              const id = optionId(questionIndex, optionIndex, option);
-              return selected.includes(id) && isWriteInOption(option);
-            });
+            canRespond || options.length === 0 || currentWriteIn.trim().length > 0;
 
           return (
             <div className="ask-question" key={questionIndex}>
               {question.question && (
-                <div className="ask-question-text">{question.question}</div>
+                <div className="ask-question-text">
+                  {questions.length > 1 ? `${questionIndex + 1}/${questions.length} ` : ""}
+                  {question.question}
+                  {question.isMultiSelect ? "（複数選択可）" : ""}
+                </div>
               )}
               {options.length > 0 && (
                 <div className="ask-question-options">
@@ -445,8 +456,12 @@ export function AskQuestionCard({
                 <textarea
                   className="ask-question-write-in"
                   aria-label="自由記述の回答"
-                  placeholder="自由記述で入力..."
-                  value={writeIns[questionIndex] ?? ""}
+                  placeholder={
+                    options.length > 0
+                      ? "その他（自由記述で回答する場合に入力…）"
+                      : "自由記述で入力..."
+                  }
+                  value={currentWriteIn}
                   disabled={!canRespond}
                   onChange={(event) =>
                     setWriteIns((prev) => ({

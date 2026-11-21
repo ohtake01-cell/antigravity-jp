@@ -1,5 +1,49 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+// ホバー先読みキャッシュ（クリック時の体感待ち時間 0ms 化）
+const STEPS_PREFETCH_TTL_MS = 8_000;
+const stepsPrefetchCache = new Map<
+  string,
+  {
+    createdAt: number;
+    promise: Promise<import("../types").StepsPageResponse | null>;
+  }
+>();
+
+function hasFreshPrefetchedSteps(urlPath: string): boolean {
+  const entry = stepsPrefetchCache.get(urlPath);
+  if (!entry) return false;
+  if (Date.now() - entry.createdAt > STEPS_PREFETCH_TTL_MS) {
+    stepsPrefetchCache.delete(urlPath);
+    return false;
+  }
+  return true;
+}
+
+function storePrefetchedSteps(
+  urlPath: string,
+  promise: Promise<import("../types").StepsPageResponse | null>,
+): void {
+  if (stepsPrefetchCache.size >= 16) {
+    const oldest = stepsPrefetchCache.keys().next().value;
+    if (oldest) stepsPrefetchCache.delete(oldest);
+  }
+  stepsPrefetchCache.set(urlPath, { createdAt: Date.now(), promise });
+}
+
+function consumePrefetchedSteps(
+  urlPath: string,
+): Promise<import("../types").StepsPageResponse> | null {
+  const entry = stepsPrefetchCache.get(urlPath);
+  if (!entry) return null;
+  stepsPrefetchCache.delete(urlPath);
+  if (Date.now() - entry.createdAt > STEPS_PREFETCH_TTL_MS) return null;
+  return entry.promise.then((res) => {
+    if (res) return res;
+    return request<import("../types").StepsPageResponse>(urlPath);
+  });
+}
+
 function previewBody(text: string): string {
   const singleLine = text.replace(/\s+/g, " ").trim();
   if (singleLine.length <= 120) return singleLine;
@@ -121,9 +165,29 @@ export const api = {
     if (offset !== undefined) params.set("offset", String(offset));
     if (limit !== undefined) params.set("limit", String(limit));
     if (tail !== undefined) params.set("tail", String(tail));
-    return request<import("../types").StepsPageResponse>(
-      `/api/conversations/${cascadeId}/steps?${params}`,
-    );
+    const urlPath = `/api/conversations/${cascadeId}/steps?${params}`;
+    // ホバー先読みで直近 8 秒以内に取得済みの初期 tail リクエストがあれば 0ms 即時返却（消費後は破棄）
+    if (offset === undefined && limit === undefined && tail !== undefined) {
+      const prefetched = consumePrefetchedSteps(urlPath);
+      if (prefetched) return prefetched;
+    }
+    return request<import("../types").StepsPageResponse>(urlPath);
+  },
+
+  /** サイドバーホバー時にチャット最新ステップを裏で先読み（クリック時の体感を 0ms 化） */
+  prefetchSteps: (cascadeId: string, tail = 100) => {
+    if (!cascadeId) return;
+    const urlPath = `/api/conversations/${cascadeId}/steps?tail=${tail}`;
+    if (hasFreshPrefetchedSteps(urlPath)) return;
+    const promise = request<import("../types").StepsPageResponse>(
+      urlPath,
+      {},
+      8_000,
+    ).catch(() => {
+      stepsPrefetchCache.delete(urlPath);
+      return null;
+    });
+    storePrefetchedSteps(urlPath, promise);
   },
 
   getWorkspaces: () =>
@@ -153,7 +217,11 @@ export const api = {
       },
     ),
 
-  createProject: (payload: { name?: string; folderPath?: string }) =>
+  createProject: (payload: {
+    name?: string;
+    folderPath?: string;
+    instructions?: string;
+  }) =>
     request<{ project: import("../types").ProjectEntry }>("/api/projects", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -164,6 +232,7 @@ export const api = {
     payload: {
       name?: string;
       folderPath?: string;
+      instructions?: string;
       clearFolder?: boolean;
       createFolderIfMissing?: boolean;
       preserveConversationIds?: string[];
@@ -936,5 +1005,151 @@ export const api = {
         body: JSON.stringify(payload),
       },
       30_000,
+    ),
+
+  transcribeAudio: async (
+    audioInput: Blob | string,
+    filename = "voice.webm",
+    language = "ja",
+  ): Promise<{ text: string; elapsedMs: number }> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60_000);
+    let res: Response;
+    try {
+      if (typeof audioInput === "string") {
+        res = await fetch(`${API_BASE}/api/voice/transcribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ audioBase64: audioInput, language }),
+          signal: controller.signal,
+        });
+      } else {
+        const fd = new FormData();
+        fd.append("file", audioInput, filename);
+        fd.append("language", language);
+        res = await fetch(`${API_BASE}/api/voice/transcribe`, {
+          method: "POST",
+          body: fd,
+          signal: controller.signal,
+        });
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      let msg: string;
+      try {
+        msg = JSON.parse(body).error ?? body;
+      } catch {
+        msg = body;
+      }
+      throw new Error(msg || `API ${res.status}`);
+    }
+    return res.json();
+  },
+
+  // ── Extensions (MCP / Skills / Plugins / Personal Memory / Global Rules) ──
+
+  extensionsOverview: () =>
+    request<import("../types").ExtensionOverviewResponse>(
+      "/api/extensions/overview",
+    ),
+
+  saveMcpServer: (payload: {
+    name: string;
+    transport: "stdio" | "http";
+    command?: string;
+    args?: string[];
+    url?: string;
+    env?: Record<string, string>;
+    headers?: Record<string, string>;
+    disabled?: boolean;
+  }) =>
+    request<{ ok: boolean; mcpServers: import("../types").McpServerEntry[] }>(
+      "/api/extensions/mcp",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  toggleMcpServer: (name: string, disabled: boolean) =>
+    request<{ ok: boolean; mcpServers: import("../types").McpServerEntry[] }>(
+      `/api/extensions/mcp/${encodeURIComponent(name)}`,
+      { method: "PATCH", body: JSON.stringify({ disabled }) },
+    ),
+
+  deleteMcpServer: (name: string) =>
+    request<{ ok: boolean; mcpServers: import("../types").McpServerEntry[] }>(
+      `/api/extensions/mcp/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    ),
+
+  saveSkill: (payload: {
+    slug?: string;
+    name: string;
+    description?: string;
+    instructions: string;
+  }) =>
+    request<{ ok: boolean; slug: string }>("/api/extensions/skills", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteSkill: (slug: string) =>
+    request<{ ok: boolean }>(
+      `/api/extensions/skills/${encodeURIComponent(slug)}`,
+      { method: "DELETE" },
+    ),
+
+  installPluginOrSkill: (source: string) =>
+    request<{ ok: boolean; installedAs: "skill" | "plugin"; name: string }>(
+      "/api/extensions/plugins/install",
+      { method: "POST", body: JSON.stringify({ source }) },
+      60_000,
+    ),
+
+  deletePlugin: (id: string) =>
+    request<{ ok: boolean }>(
+      `/api/extensions/plugins/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
+
+  saveMemory: (payload: {
+    id?: string;
+    title?: string;
+    content: string;
+    category?: import("../types").MemoryItem["category"];
+    enabled?: boolean;
+  }) =>
+    request<{ ok: boolean; memories: import("../types").MemoryItem[] }>(
+      "/api/extensions/memories",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  updateMemory: (
+    id: string,
+    patch: Partial<import("../types").MemoryItem>,
+  ) =>
+    request<{ ok: boolean; memories: import("../types").MemoryItem[] }>(
+      `/api/extensions/memories/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
+
+  deleteMemory: (id: string) =>
+    request<{ ok: boolean; memories: import("../types").MemoryItem[] }>(
+      `/api/extensions/memories/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
+
+  saveGlobalRules: (content: string) =>
+    request<{ ok: boolean; globalRules: string }>("/api/extensions/rules", {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+
+  // ── App Update Check (GitHub Releases) ──
+
+  checkUpdate: (force = false) =>
+    request<import("../types").UpdateCheckResponse>(
+      `/api/update/check${force ? "?force=1" : ""}`,
     ),
 };

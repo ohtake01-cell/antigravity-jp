@@ -121,15 +121,19 @@ export function rewriteFileUris(text: string): string {
 }
 
 export function renderMarkdown(text: string): string {
-  if (markdownCache.has(text)) {
-    return markdownCache.get(text)!;
+  const cached = markdownCache.get(text);
+  if (cached !== undefined) {
+    // 真の LRU: 直近ヒットしたエントリを末尾へ移動して追い出しを防ぐ
+    markdownCache.delete(text);
+    markdownCache.set(text, cached);
+    return cached;
   }
 
   const rewritten = rewriteFileUris(text);
   const html = marked.parse(rewritten, { async: false }) as string;
 
   // Cap the cache to prevent unbounded growth
-  if (markdownCache.size > 500) {
+  if (markdownCache.size >= 1000) {
     const firstKey = markdownCache.keys().next().value!;
     markdownCache.delete(firstKey);
   }

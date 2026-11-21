@@ -4,7 +4,6 @@ import type { ConversationEntry } from "../hooks/useConversations";
 import { getAppIconUrl } from "../hooks/useClientSettings";
 import type { AppIconPreset, AppTier, ProjectEntry } from "../types";
 import { api } from "../api/client";
-import { workspaceNameFromMetadata } from "../utils/workspaceNames";
 import {
   IconPlus,
   IconSearch,
@@ -71,16 +70,6 @@ function relativeTime(iso?: string): string {
   if (hours < 24) return `${hours}時間前`;
   const days = Math.floor(hours / 24);
   return `${days}日前`;
-}
-
-function extractWorkspaceName(conv: ConversationEntry): string {
-  if (conv.summary.projectName) {
-    return conv.summary.projectName;
-  }
-  const name = workspaceNameFromMetadata(conv.summary.workspaces?.[0], {
-    collapseAntigravityPlayground: true,
-  });
-  return name === "Others" ? "ワークスペースなし" : name;
 }
 
 function isUnloaded(conv: ConversationEntry): boolean {
@@ -544,11 +533,13 @@ export function Sidebar({
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectFolder, setNewProjectFolder] = useState("");
+  const [newProjectInstructions, setNewProjectInstructions] = useState("");
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editProjectName, setEditProjectName] = useState("");
   const [editProjectFolder, setEditProjectFolder] = useState("");
+  const [editProjectInstructions, setEditProjectInstructions] = useState("");
   const [editClearFolder, setEditClearFolder] = useState(false);
   const [editCreateFolder, setEditCreateFolder] = useState(false);
   const [editProjectSaving, setEditProjectSaving] = useState(false);
@@ -627,11 +618,18 @@ export function Sidebar({
       setProjectSaving(true);
       setProjectError(null);
       try {
-        const res = await api.createProject({ name, folderPath });
+        const res = await api.createProject({
+          name,
+          folderPath,
+          ...(newProjectInstructions.trim()
+            ? { instructions: newProjectInstructions.trim() }
+            : {}),
+        });
         if (res?.project) {
           setProjects((prev) => [...prev, res.project]);
           setNewProjectName("");
           setNewProjectFolder("");
+          setNewProjectInstructions("");
           setAddProjectOpen(false);
         }
       } catch (err) {
@@ -642,7 +640,7 @@ export function Sidebar({
         setProjectSaving(false);
       }
     },
-    [newProjectFolder, newProjectName, projectSaving],
+    [newProjectFolder, newProjectName, newProjectInstructions, projectSaving],
   );
 
   const handleStartEditProject = useCallback(
@@ -650,6 +648,7 @@ export function Sidebar({
       setEditingProjectId(proj.id);
       setEditProjectName(proj.name);
       setEditProjectFolder(proj.folderPath || defaultProjectFolder || "");
+      setEditProjectInstructions(proj.instructions || "");
       setEditClearFolder(false);
       setEditCreateFolder(false);
       setEditProjectError(null);
@@ -677,6 +676,7 @@ export function Sidebar({
         const res = await api.updateProject(projId, {
           name: trimmedName,
           folderPath: editClearFolder ? "" : editProjectFolder.trim(),
+          instructions: editProjectInstructions.trim(),
           clearFolder: editClearFolder,
           createFolderIfMissing: editCreateFolder,
           preserveConversationIds,
@@ -703,6 +703,7 @@ export function Sidebar({
       editProjectSaving,
       editProjectName,
       editProjectFolder,
+      editProjectInstructions,
       editClearFolder,
       editCreateFolder,
       showSidebarToast,
@@ -833,26 +834,9 @@ export function Sidebar({
         const byId = projects.find((p) => p.id === metaProjId);
         if (byId) return byId;
       }
-      const wsUri = conv.summary.workspaces?.[0]?.workspaceFolderAbsoluteUri?.replace(
-        /\/+$/,
-        "",
-      );
-      if (wsUri) {
-        const uriMatches = projects.filter(
-          (p) => p.folderUri && p.folderUri.replace(/\/+$/, "") === wsUri,
-        );
-        if (uriMatches.length === 1) return uriMatches[0];
-        if (uriMatches.length > 1) {
-          // 同じフォルダパスを共有するプロジェクトが複数ある場合はフォルダ名一致のみ自動分類（誤吸い寄せ防止）
-          const uriBase = decodeURIComponent(wsUri.split("/").pop() ?? "");
-          const exact = uriMatches.filter((p) => p.name === uriBase);
-          if (exact.length === 1) return exact[0];
-          return undefined;
-        }
-      }
-      const wsName = extractWorkspaceName(conv);
-      const nameMatches = projects.filter((p) => p.name === wsName);
-      return nameMatches.length === 1 ? nameMatches[0] : undefined;
+      // ChatGPT / Claude 方式: 手動で割り当てたチャット・プロジェクトの「+」から作成したチャットのみプロジェクト配下へ分類し、
+      // 通常の未割り当てチャットがフォルダ名一致で勝手にプロジェクト内へ吸い込まれて隠れないようにする
+      return undefined;
     },
     [projects, localProjectOverrides],
   );
@@ -881,6 +865,7 @@ export function Sidebar({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const touchStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -1041,7 +1026,7 @@ export function Sidebar({
     const pinnedList: ConversationEntry[] = [];
     const projectMap = new Map<string, ConversationEntry[]>();
     const projectAllIdsMap = new Map<string, string[]>();
-    const workspaceMap = new Map<string, ConversationEntry[]>();
+    const recentList: ConversationEntry[] = [];
 
     for (const proj of projects) {
       projectMap.set(proj.id, []);
@@ -1098,10 +1083,7 @@ export function Sidebar({
         list.push(conv);
         projectMap.set(matchedProj.id, list);
       } else {
-        const name = extractWorkspaceName(conv);
-        const list = workspaceMap.get(name) ?? [];
-        list.push(conv);
-        workspaceMap.set(name, list);
+        recentList.push(conv);
       }
     }
 
@@ -1173,43 +1155,24 @@ export function Sidebar({
       });
     }
 
-    // 3. Other / Unregistered workspace groups (e.g., ワークスペースなし)
-    const workspaceGroups: WorkspaceGroup[] = Array.from(workspaceMap.entries())
-      .map(([name, convs]) => {
-        convs.sort((a, b) => {
-          const aRunning = isConvRunning(a);
-          const bRunning = isConvRunning(b);
-          if (aRunning !== bRunning) return aRunning ? -1 : 1;
-          return (
-            parseSafeTime(b.summary.lastModifiedTime) -
-            parseSafeTime(a.summary.lastModifiedTime)
-          );
-        });
-        return {
-          name,
-          conversations: convs,
-          hasRunning: convs.some((c) => isConvRunning(c)),
-        };
-      })
-      .sort((a, b) => {
-        if (a.hasRunning !== b.hasRunning) return a.hasRunning ? -1 : 1;
-        if (a.name === "ワークスペースなし" && b.name !== "ワークスペースなし") return 1;
-        if (a.name !== "ワークスペースなし" && b.name === "ワークスペースなし") return -1;
-
-        const aHasActive = a.conversations.some((c) => !isUnloaded(c));
-        const bHasActive = b.conversations.some((c) => !isUnloaded(c));
-        if (aHasActive !== bHasActive) return aHasActive ? -1 : 1;
-        const aTime = Math.max(
-          0,
-          ...a.conversations.map((c) => parseSafeTime(c.summary.lastModifiedTime)),
+    // 3. Recent / Unassigned chats (ChatGPT / Claude style flat chronological list)
+    const workspaceGroups: WorkspaceGroup[] = [];
+    if (recentList.length > 0) {
+      recentList.sort((a, b) => {
+        const aRunning = isConvRunning(a);
+        const bRunning = isConvRunning(b);
+        if (aRunning !== bRunning) return aRunning ? -1 : 1;
+        return (
+          parseSafeTime(b.summary.lastModifiedTime) -
+          parseSafeTime(a.summary.lastModifiedTime)
         );
-        const bTime = Math.max(
-          0,
-          ...b.conversations.map((c) => parseSafeTime(c.summary.lastModifiedTime)),
-        );
-
-        return bTime - aTime;
       });
+      workspaceGroups.push({
+        name: "💬 最近のチャット",
+        conversations: recentList,
+        hasRunning: recentList.some((c) => isConvRunning(c)),
+      });
+    }
 
     return [...result, ...projectGroups, ...workspaceGroups];
   }, [
@@ -1365,6 +1328,19 @@ export function Sidebar({
       <div key={itemKey} className="sidebar-item-group">
       <div
         className={`sidebar-item ${isActive ? "active" : ""} ${isRunning ? "running" : ""} ${isRunning && isActive ? "active-running" : ""} ${isUnloaded(conv) ? "dimmed" : ""} ${menuOpen === itemKey ? "menu-open" : ""}`}
+        onMouseEnter={() => {
+          if (isActive || isRenaming) return;
+          if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+          prefetchTimerRef.current = setTimeout(() => {
+            api.prefetchSteps?.(conv.id, 100);
+          }, 100);
+        }}
+        onMouseLeave={() => {
+          if (prefetchTimerRef.current) {
+            clearTimeout(prefetchTimerRef.current);
+            prefetchTimerRef.current = null;
+          }
+        }}
         onTouchStart={(e) => {
           if (isRenaming) return;
           const touch = e.touches[0];
@@ -1532,10 +1508,10 @@ export function Sidebar({
                           />{" "}
                           {conv.summary.status !== "CASCADE_RUN_STATUS_RUNNING" &&
                           hasAgentActivity
-                            ? "● エージェント稼働中..."
+                            ? "エージェント稼働中..."
                             : isActive
-                              ? "● 現在操作中 (実行中)..."
-                              : "● バックグラウンド実行中..."}
+                              ? "現在操作中 (実行中)..."
+                              : "バックグラウンド実行中..."}
                           {displayProjectName && (
                             <span className="sidebar-meta-project">
                               {" · "}
@@ -1913,158 +1889,70 @@ export function Sidebar({
             <div className="loading-spinner" />
           </div>
         ) : (
-          <>
-            {groups
-              .filter((g) => g.isRunningSection || g.isPinnedSection)
-              .map((group) => {
-                const totalCount = group.conversations.length;
-                const isGroupCollapsed = collapsed[group.name] ?? false;
-                return (
-                  <div
-                    key={group.name}
-                    className={`workspace-group ${group.isRunningSection ? "running-workspace-group" : ""} ${group.isPinnedSection ? "pinned-workspace-group" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className={`workspace-group-header ${group.isRunningSection ? "running-group-header" : ""} ${group.isPinnedSection ? "pinned-group-header" : ""}`}
-                      onClick={() => toggleGroup(group.name)}
-                    >
-                      <span
-                        className={`workspace-group-chevron ${isGroupCollapsed ? "collapsed" : ""}`}
-                      >
-                        ▾
-                      </span>
-                      <span className="workspace-group-name">{group.name}</span>
-                      {group.hasRunning && (
-                        <IconSpinner size={12} className="sidebar-running-spinner" />
-                      )}
-                      <span className="workspace-group-count">{totalCount}</span>
-                    </button>
+          (() => {
+            const runningGroups = groups.filter((g) => g.isRunningSection);
+            const pinnedGroups = groups.filter((g) => g.isPinnedSection);
+            const projectGroups = groups.filter((g) => Boolean(g.project));
+            const otherGroups = groups.filter(
+              (g) => !g.isRunningSection && !g.isPinnedSection && !g.project,
+            );
 
-                    {!isGroupCollapsed && (
-                      <div className="workspace-group-items">
-                        {group.conversations.map((c) =>
-                          renderItem(
-                            c,
-                            group.isRunningSection ? "running" : "pinned",
-                          ),
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-            <div className="sidebar-projects-bar" data-testid="sidebar-projects">
-              <div className="sidebar-projects-header">
-                <span className="sidebar-projects-title">プロジェクト</span>
-                <div className="sidebar-projects-header-actions">
-                  {projects.length > 0 && (
-                    <button
-                      type="button"
-                      className={`sidebar-projects-icon-btn ${hideEmptyProjects ? "active" : ""}`}
-                      title={
-                        hideEmptyProjects
-                          ? "空のプロジェクトも表示"
-                          : "会話のあるプロジェクトのみ表示"
-                      }
-                      aria-label="プロジェクト絞り込み"
-                      onClick={() => setHideEmptyProjects((v) => !v)}
-                    >
-                      <IconFilter size={13} />
-                    </button>
-                  )}
+            const renderSpecialGroup = (group: WorkspaceGroup) => {
+              const totalCount = group.conversations.length;
+              const isGroupCollapsed = collapsed[group.name] ?? false;
+              return (
+                <div
+                  key={group.name}
+                  className={`workspace-group ${group.isRunningSection ? "running-workspace-group" : ""} ${group.isPinnedSection ? "pinned-workspace-group" : ""}`}
+                >
                   <button
                     type="button"
-                    className={`sidebar-projects-icon-btn ${addProjectOpen ? "active" : ""}`}
-                    title="プロジェクトを追加"
-                    aria-label="プロジェクトを追加"
-                    onClick={() => {
-                      setAddProjectOpen((v) => {
-                        const next = !v;
-                        if (next && !newProjectFolder && defaultProjectFolder) {
-                          setNewProjectFolder(defaultProjectFolder);
-                        }
-                        return next;
-                      });
-                      setProjectError(null);
-                    }}
+                    className={`workspace-group-header ${group.isRunningSection ? "running-group-header" : ""} ${group.isPinnedSection ? "pinned-group-header" : ""}`}
+                    onClick={() => toggleGroup(group.name)}
                   >
-                    <IconFolderPlus size={14} />
+                    <span
+                      className={`workspace-group-chevron ${isGroupCollapsed ? "collapsed" : ""}`}
+                    >
+                      ▾
+                    </span>
+                    <span className="workspace-group-name">{group.name}</span>
+                    {group.hasRunning && (
+                      <IconSpinner size={12} className="sidebar-running-spinner" />
+                    )}
+                    <span className="workspace-group-count">{totalCount}</span>
                   </button>
-                </div>
-              </div>
 
-              {addProjectOpen && (
-                <form
-                  className="sidebar-project-add-form"
-                  onSubmit={(e) => void handleCreateProject(e)}
-                >
-                  <input
-                    type="text"
-                    className="sidebar-project-input"
-                    placeholder="プロジェクト名（例: アプリ開発・旅行メモ）"
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                    disabled={projectSaving}
-                  />
-                  <input
-                    type="text"
-                    className="sidebar-project-input"
-                    placeholder={
-                      defaultProjectFolder
-                        ? `フォルダパス（空欄で ${defaultProjectFolder}）`
-                        : "フォルダパス（空欄でも作成可・例: ~/Projects）"
-                    }
-                    value={newProjectFolder}
-                    onChange={(e) => setNewProjectFolder(e.target.value)}
-                    disabled={projectSaving}
-                  />
-                  {projectError && (
-                    <div className="sidebar-project-error">{projectError}</div>
+                  {!isGroupCollapsed && (
+                    <div className="workspace-group-items">
+                      {group.conversations.map((c) =>
+                        renderItem(
+                          c,
+                          group.isRunningSection ? "running" : "pinned",
+                        ),
+                      )}
+                    </div>
                   )}
-                  <div className="sidebar-project-form-btns">
-                    <button
-                      type="submit"
-                      className="sidebar-project-submit-btn"
-                      disabled={projectSaving}
-                    >
-                      {projectSaving ? "追加中…" : "追加"}
-                    </button>
-                    <button
-                      type="button"
-                      className="sidebar-project-cancel-btn"
-                      onClick={() => {
-                        setAddProjectOpen(false);
-                        setProjectError(null);
-                      }}
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
+                </div>
+              );
+            };
 
-            {groups
-              .filter((g) => !g.isRunningSection && !g.isPinnedSection)
-              .map((group) => {
-                const proj = group.project;
-                const groupKey = proj ? `proj:${proj.id}` : group.name;
-                const totalCount = group.conversations.length;
-                const isGroupCollapsed = collapsed[groupKey] ?? false;
-                const isExpanded = expanded[groupKey] ?? false;
-                const visibleItems = isExpanded
-                  ? group.conversations
-                  : group.conversations.slice(0, PREVIEW_COUNT);
-                const hiddenCount = totalCount - PREVIEW_COUNT;
+            const renderWorkspaceGroup = (group: WorkspaceGroup) => {
+              const proj = group.project;
+              const groupKey = proj ? `proj:${proj.id}` : group.name;
+              const totalCount = group.conversations.length;
+              const isGroupCollapsed = collapsed[groupKey] ?? false;
+              const isExpanded = expanded[groupKey] ?? false;
+              const visibleItems = isExpanded
+                ? group.conversations
+                : group.conversations.slice(0, PREVIEW_COUNT);
+              const hiddenCount = totalCount - PREVIEW_COUNT;
 
-                return (
-                  <div
-                    key={groupKey}
-                    data-project-id={proj?.id}
-                    className={`workspace-group ${proj ? "project-workspace-group" : ""}`}
-                  >
+              return (
+                <div
+                  key={groupKey}
+                  data-project-id={proj?.id}
+                  className={`workspace-group ${proj ? "project-workspace-group" : ""}`}
+                >
                     {proj ? (
                       <div
                         className={`workspace-group-header project-group-header ${isGroupCollapsed ? "is-collapsed" : ""} ${projectMenuId === proj.id ? "menu-open" : ""}`}
@@ -2364,6 +2252,16 @@ export function Sidebar({
                           }}
                           disabled={editProjectSaving || editClearFolder}
                         />
+                        <textarea
+                          className="sidebar-project-input"
+                          rows={2}
+                          placeholder="プロジェクト専用指示（任意・例: このプロジェクトではTypeScriptで簡潔に回答）"
+                          aria-label="プロジェクト専用指示を編集"
+                          value={editProjectInstructions}
+                          onChange={(e) => setEditProjectInstructions(e.target.value)}
+                          disabled={editProjectSaving}
+                          style={{ resize: "vertical", minHeight: 44 }}
+                        />
                         <label
                           style={{
                             display: "flex",
@@ -2450,9 +2348,125 @@ export function Sidebar({
                       </div>
                     )}
                   </div>
-                );
-              })}
-          </>
+              );
+            };
+
+            return (
+              <>
+                {/* 1. 実行中（稼働中のみ最上段にライブ表示） */}
+                {runningGroups.map(renderSpecialGroup)}
+
+                {/* 2. プロジェクト（ChatGPT / Claude 準拠で常に上段に固定） */}
+                <div className="sidebar-projects-bar" data-testid="sidebar-projects">
+                  <div className="sidebar-projects-header">
+                    <span className="sidebar-projects-title">プロジェクト</span>
+                    <div className="sidebar-projects-header-actions">
+                      {projects.length > 0 && (
+                        <button
+                          type="button"
+                          className={`sidebar-projects-icon-btn ${hideEmptyProjects ? "active" : ""}`}
+                          title={
+                            hideEmptyProjects
+                              ? "空のプロジェクトも表示"
+                              : "会話のあるプロジェクトのみ表示"
+                          }
+                          aria-label="プロジェクト絞り込み"
+                          onClick={() => setHideEmptyProjects((v) => !v)}
+                        >
+                          <IconFilter size={13} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={`sidebar-projects-icon-btn ${addProjectOpen ? "active" : ""}`}
+                        title="プロジェクトを追加"
+                        aria-label="プロジェクトを追加"
+                        onClick={() => {
+                          setAddProjectOpen((v) => {
+                            const next = !v;
+                            if (next && !newProjectFolder && defaultProjectFolder) {
+                              setNewProjectFolder(defaultProjectFolder);
+                            }
+                            return next;
+                          });
+                          setProjectError(null);
+                        }}
+                      >
+                        <IconFolderPlus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {addProjectOpen && (
+                    <form
+                      className="sidebar-project-add-form"
+                      onSubmit={(e) => void handleCreateProject(e)}
+                    >
+                      <input
+                        type="text"
+                        className="sidebar-project-input"
+                        placeholder="プロジェクト名（例: アプリ開発・旅行メモ）"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        disabled={projectSaving}
+                      />
+                      <input
+                        type="text"
+                        className="sidebar-project-input"
+                        placeholder={
+                          defaultProjectFolder
+                            ? `フォルダパス（空欄で ${defaultProjectFolder}）`
+                            : "フォルダパス（空欄でも作成可・例: ~/Projects）"
+                        }
+                        value={newProjectFolder}
+                        onChange={(e) => setNewProjectFolder(e.target.value)}
+                        disabled={projectSaving}
+                      />
+                      <textarea
+                        className="sidebar-project-input"
+                        rows={2}
+                        placeholder="プロジェクト専用指示（任意・新規チャットに自動適用）"
+                        value={newProjectInstructions}
+                        onChange={(e) => setNewProjectInstructions(e.target.value)}
+                        disabled={projectSaving}
+                        style={{ resize: "vertical", minHeight: 42 }}
+                      />
+                      {projectError && (
+                        <div className="sidebar-project-error">{projectError}</div>
+                      )}
+                      <div className="sidebar-project-form-btns">
+                        <button
+                          type="submit"
+                          className="sidebar-project-submit-btn"
+                          disabled={projectSaving}
+                        >
+                          {projectSaving ? "追加中…" : "追加"}
+                        </button>
+                        <button
+                          type="button"
+                          className="sidebar-project-cancel-btn"
+                          onClick={() => {
+                            setAddProjectOpen(false);
+                            setProjectError(null);
+                          }}
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
+                {projectGroups.map(renderWorkspaceGroup)}
+
+                {/* 3. ピン留め（プロジェクト直下に配置） */}
+                {pinnedGroups.map(renderSpecialGroup)}
+
+                {/* 4. ワークスペース／最近のチャット */}
+                {otherGroups.map(renderWorkspaceGroup)}
+              </>
+            );
+          })()
         )}
       </div>
       </div>

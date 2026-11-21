@@ -259,8 +259,9 @@ function isErrorStepMessage(msg: ChatMessage): boolean {
   );
 }
 
-function SystemMessage({
+const SystemMessage = memo(function SystemMessage({
   msg,
+  cascadeId,
   onFilePermission,
   onCommandAction,
   onAskQuestion,
@@ -269,6 +270,7 @@ function SystemMessage({
   childSubagents,
 }: {
   msg: ChatMessage;
+  cascadeId?: string;
   onFilePermission: (
     trajectoryId: string,
     stepIndex: number,
@@ -338,6 +340,7 @@ function SystemMessage({
               step={msg.step}
               askQuestionRequest={askQuestion}
               fallbackStepIndex={msg.stepIndex}
+              fallbackTrajectoryId={cascadeId}
               onAskQuestion={onAskQuestion}
             />
           </div>
@@ -402,11 +405,14 @@ function SystemMessage({
       </div>
     </div>
   );
-}
+});
 
 function isInteractiveWaitingStep(msg: ChatMessage): boolean {
   return (
-    msg.role === "system" && msg.step?.status === "CORTEX_STEP_STATUS_WAITING"
+    msg.role === "system" &&
+    (msg.step?.status === "CORTEX_STEP_STATUS_WAITING" ||
+      msg.type === "CORTEX_STEP_TYPE_ASK_QUESTION" ||
+      msg.type === "CORTEX_STEP_TYPE_GENERIC_WAITING")
   );
 }
 
@@ -481,7 +487,7 @@ function summarizeWorkGroup(items: ChatMessage[]): {
   };
 }
 
-function WorkStepsGroup({
+const WorkStepsGroup = memo(function WorkStepsGroup({
   items,
   onFilePermission,
   onCommandAction,
@@ -574,7 +580,7 @@ function WorkStepsGroup({
       </details>
     </div>
   );
-}
+});
 
 interface MediaItem {
   mimeType?: string;
@@ -1134,9 +1140,14 @@ export function ChatPanel({
 
   // Lazy load older steps when user scrolls to top
   const loadOlderLock = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const touchStartYRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el || suppressScroll.current) return;
+    const prevTop = lastScrollTopRef.current;
+    lastScrollTopRef.current = el.scrollTop;
+    const scrollingUp = el.scrollTop < prevTop - 2;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
 
     // Only trigger re-render when the button visibility actually changes
@@ -1145,7 +1156,8 @@ export function ChatPanel({
       showScrollBtnRef.current = shouldShow;
       setShowScrollBtn(shouldShow);
     }
-    isNearBottom.current = distFromBottom < 100;
+    // 上方向スクロール中は絶対に底へ引き戻されないよう即座に追従解除
+    isNearBottom.current = scrollingUp ? false : distFromBottom < 80;
 
     // Trigger lazy load when near the top (only after initial scroll-to-bottom)
     if (
@@ -1181,6 +1193,7 @@ export function ChatPanel({
   }, [hasMore, loadingOlder, loadOlder]);
 
   const scrollToBottom = useCallback(() => {
+    isNearBottom.current = true;
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
@@ -1352,7 +1365,24 @@ export function ChatPanel({
       className="chat-area"
       ref={scrollRef}
       onScroll={handleScroll}
-      onTouchMove={() => {
+      onWheel={(e) => {
+        if (e.deltaY < 0) {
+          isNearBottom.current = false;
+        }
+      }}
+      onTouchStart={(e) => {
+        touchStartYRef.current = e.touches[0]?.clientY ?? null;
+      }}
+      onTouchMove={(e) => {
+        const y = e.touches[0]?.clientY;
+        if (
+          typeof y === "number" &&
+          touchStartYRef.current !== null &&
+          y > touchStartYRef.current + 6
+        ) {
+          // 指を下にドラッグ＝チャットを上にスクロール中なので自動追従を即解除
+          isNearBottom.current = false;
+        }
         // Dismiss iOS keyboard when scrolling chat area
         const el = document.activeElement;
         if (
@@ -1415,6 +1445,7 @@ export function ChatPanel({
                 {pinnedPlanNode}
                 <SystemMessage
                   msg={msg}
+                  cascadeId={cascadeId}
                   onFilePermission={onFilePermission}
                   onCommandAction={onCommandAction}
                   onAskQuestion={onAskQuestion}

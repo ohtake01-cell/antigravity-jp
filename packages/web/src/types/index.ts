@@ -408,11 +408,14 @@ export type LocalPermissionPolicy =
   | "CASCADE_COMMANDS_AUTO_EXECUTION_AUTO"
   | "CASCADE_COMMANDS_AUTO_EXECUTION_EAGER";
 
+export type LocalPermissionMode = "request_review" | "default" | "auto" | "turbo";
+
 export interface ProjectEntry {
   id: string;
   name: string;
   folderUri?: string;
   folderPath?: string;
+  instructions?: string;
   isDefaultCli?: boolean;
 }
 
@@ -961,4 +964,86 @@ export interface ConversationAgentsResponse {
     tasks: number;
     activeTasks: number;
   };
+}
+
+// ── Extensions (MCP / Skills / Plugins / Personal Memory / Global Rules) ──
+
+export interface McpServerEntry {
+  name: string;
+  transport: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  envKeys: string[];
+  headerKeys: string[];
+  disabled: boolean;
+}
+
+export interface SkillEntry {
+  slug: string;
+  name: string;
+  description: string;
+  source: "user" | "plugin" | "builtin";
+  pluginName?: string;
+  path: string;
+  editable: boolean;
+  bodyPreview: string;
+  body?: string;
+}
+
+export interface PluginEntry {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  path: string;
+  skillCount: number;
+  hasMcp: boolean;
+  disabled: boolean;
+}
+
+export interface MemoryItem {
+  id: string;
+  title: string;
+  content: string;
+  category: "profile" | "preference" | "project" | "other";
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface ExtensionOverviewResponse {
+  ok: true;
+  mcpServers: McpServerEntry[];
+  skills: SkillEntry[];
+  plugins: PluginEntry[];
+  memories: MemoryItem[];
+  globalRules: string;
+  paths: {
+    mcpConfigPath: string;
+    skillsDir: string;
+    pluginsDir: string;
+    rulesPath: string;
+  };
+}
+
+export interface ReleaseAssetInfo {
+  name: string;
+  downloadUrl: string;
+  size: number;
+  sha256: string | null;
+}
+
+export interface UpdateCheckResponse {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseName: string | null;
+  releaseNotes: string | null;
+  releaseUrl: string;
+  publishedAt: string | null;
+  zipAsset: ReleaseAssetInfo | null;
+  dmgAsset: ReleaseAssetInfo | null;
+  checkedAt: string;
+  source: "github-api" | "github-redirect" | "error";
+  error?: string;
 }

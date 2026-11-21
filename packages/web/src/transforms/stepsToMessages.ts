@@ -327,6 +327,23 @@ export function stepsToMessages(
         type,
         icon: "alert",
       });
+    } else if (
+      step.status === "CORTEX_STEP_STATUS_WAITING" ||
+      Boolean(step.requestedInteraction)
+    ) {
+      // 将来の Antigravity 本体アップデートで未知の対話型ステップが増えても
+      // 画面に何も出ず「止まったように見える」状態を防ぐ汎用フォールバック
+      const toolLabel =
+        step.metadata?.toolCall?.name ??
+        type.replace(/^CORTEX_STEP_TYPE_/, "");
+      messages.push({
+        role: "system",
+        content: `⏳ 確認・操作待ち（${toolLabel}）: Antigravity 本体からの応答待ちリクエストです。操作できない場合は Antigravity 本体ウィンドウ側でも確認できます。`,
+        stepIndex: absIndex,
+        type: "CORTEX_STEP_TYPE_GENERIC_WAITING",
+        step,
+        icon: "alert",
+      });
     }
   }
 

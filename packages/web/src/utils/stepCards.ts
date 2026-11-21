@@ -59,11 +59,54 @@ export function getFilePermissionRequest(
   return fpr;
 }
 
+function parseAskQuestionFromToolArgs(
+  step: TrajectoryStep,
+): AskQuestionRequest | undefined {
+  const toolCall = step.metadata?.toolCall;
+  if (
+    step.type !== "CORTEX_STEP_TYPE_ASK_QUESTION" &&
+    toolCall?.name !== "ask_question"
+  ) {
+    return undefined;
+  }
+  const rawArgs = toolCall?.argumentsJson;
+  if (!rawArgs) return undefined;
+  try {
+    const parsed = JSON.parse(rawArgs) as {
+      questions?: Array<{
+        question?: string;
+        options?: Array<string | { id?: string; text?: string }>;
+        isMultiSelect?: boolean;
+        is_multi_select?: boolean;
+      }>;
+    };
+    if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return undefined;
+    }
+    return {
+      questions: parsed.questions.map((q) => ({
+        question: q.question,
+        isMultiSelect: q.isMultiSelect ?? q.is_multi_select ?? false,
+        options: Array.isArray(q.options)
+          ? q.options.map((opt, idx) =>
+              typeof opt === "string"
+                ? { id: String(idx + 1), text: opt }
+                : { id: opt.id ?? String(idx + 1), text: opt.text ?? opt.id ?? "" },
+            )
+          : [],
+      })),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export function getAskQuestionRequest(
   step: TrajectoryStep,
 ): AskQuestionRequest | undefined {
-  const request = step.askQuestion ?? step.requestedInteraction?.askQuestion;
-  return request?.questions && request.questions.length > 0
-    ? request
-    : undefined;
+  const direct = step.askQuestion ?? step.requestedInteraction?.askQuestion;
+  if (direct?.questions && direct.questions.length > 0) {
+    return direct;
+  }
+  return parseAskQuestionFromToolArgs(step);
 }

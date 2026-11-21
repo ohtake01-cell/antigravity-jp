@@ -279,13 +279,8 @@
   word-break: break-word;
 }
 
-/* 長い会話でも画面外のレイアウト・描画を自動スキップしてスクロールを滑らかに維持 */
-.chat-area-inner > .message,
-.chat-area-inner > .step-card,
-.chat-area-inner > .chat-block {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 84px;
-}
+/* 注: 下端固定＋上方向スクロールのチャットでは content-visibility: auto を使うと
+ * 画面上端の要素が仮高さ→実高さへ再計算されるたびに小刻みに揺れるため使用しない */
 
 /* ── Message bubbles ── */
 
